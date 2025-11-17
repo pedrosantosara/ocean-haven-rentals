@@ -9,13 +9,7 @@ import { Calendar, Trash2, RefreshCw, Copy, Hotel, Globe } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-interface CalendarSync {
-  id: string;
-  platform: string;
-  ical_url: string;
-  last_synced_at: string | null;
-  is_active: boolean;
-}
+interface CalendarSync { id: number; platform: string; url: string; created_at?: string }
 
 export function ICalSync() {
   const [syncs, setSyncs] = useState<CalendarSync[]>([]);
@@ -28,16 +22,11 @@ export function ICalSync() {
   }, []);
 
   const loadSyncs = async () => {
-    const { data, error } = await supabase
-      .from("calendar_sync")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      toast.error("Erro ao carregar sincronizações");
-    } else {
-      setSyncs(data || []);
-    }
+    const token = localStorage.getItem("token");
+    const API = "http://localhost:3005";
+    const res = await fetch(`${API}/ical`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) { toast.error("Erro ao carregar sincronizações"); }
+    else { const j = await res.json(); setSyncs(j.data || []); }
     setLoading(false);
   };
 
@@ -46,43 +35,33 @@ export function ICalSync() {
       toast.error("Preencha todos os campos");
       return;
     }
-
-    const { error } = await supabase.from("calendar_sync").insert({
-      platform: newPlatform,
-      ical_url: newUrl,
+    const token = localStorage.getItem("token");
+    if (!token) { toast.error("Faça login"); return; }
+    const API = "http://localhost:3005";
+    const res = await fetch(`${API}/ical`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ platform: newPlatform, url: newUrl }),
     });
-
-    if (error) {
-      toast.error("Erro ao adicionar sincronização");
-    } else {
-      toast.success("Sincronização adicionada com sucesso");
-      setNewPlatform("");
-      setNewUrl("");
-      loadSyncs();
-    }
+    if (!res.ok) { toast.error("Erro ao adicionar sincronização"); return; }
+    toast.success("Sincronização adicionada");
+    setNewPlatform("");
+    setNewUrl("");
+    loadSyncs();
   };
 
-  const removeSync = async (id: string) => {
-    const { error } = await supabase
-      .from("calendar_sync")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      toast.error("Erro ao remover sincronização");
-    } else {
-      toast.success("Sincronização removida");
-      loadSyncs();
-    }
+  const removeSync = async (id: number) => {
+    const token = localStorage.getItem("token");
+    if (!token) { toast.error("Faça login"); return; }
+    const API = "http://localhost:3005";
+    const res = await fetch(`${API}/ical/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { toast.error("Erro ao remover"); return; }
+    toast.success("Sincronização removida");
+    loadSyncs();
   };
 
-  const syncNow = async (id: string) => {
+  const syncNow = async (_id: number) => {
     toast.info("Sincronização iniciada... (funcionalidade em desenvolvimento)");
-    // TODO: Implement actual iCal sync logic
-    await supabase
-      .from("calendar_sync")
-      .update({ last_synced_at: new Date().toISOString() })
-      .eq("id", id);
     loadSyncs();
   };
 
@@ -173,11 +152,11 @@ export function ICalSync() {
               </CardHeader>
               <CardContent className="space-y-2">
                 <div className="flex gap-2">
-                  <Input readOnly value={`${window.location.origin}/export.ics`} />
+                  <Input readOnly value={`http://localhost:3005/calendar/merged.ics`} />
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/export.ics`)}
+                    onClick={() => navigator.clipboard.writeText(`http://localhost:3005/calendar/merged.ics`)}
                     title="Copiar URL"
                   >
                     <Copy className="h-4 w-4" />
@@ -205,19 +184,15 @@ export function ICalSync() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <p className="font-semibold">{sync.platform}</p>
-                    <Badge variant={sync.is_active ? "default" : "secondary"}>
-                      {sync.is_active ? "Ativo" : "Inativo"}
-                    </Badge>
+                    <Badge variant={"default"}>Ativo</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground truncate max-w-md">
-                    {sync.ical_url}
+                    {sync.url}
                   </p>
-                  {sync.last_synced_at && (
+                  {sync.created_at && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      Última sincronização:{" "}
-                      {format(new Date(sync.last_synced_at), "dd/MM/yyyy HH:mm", {
-                        locale: ptBR,
-                      })}
+                      Adicionado:{" "}
+                      {format(new Date(sync.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                     </p>
                   )}
                 </div>

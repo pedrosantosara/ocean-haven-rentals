@@ -50,31 +50,34 @@ export const BookingCalendar = () => {
       toast.error("Número de hóspedes inválido");
       return;
     }
-
-    const { data: { user } } = await supabase.auth.getUser();
+    const API = "http://localhost:3005";
 
     setLoading(true);
 
     try {
       let created: CreatedBooking | null = null;
-      if (user) {
-        const { data, error } = await supabase
-          .from("bookings")
-          .insert({
-            user_id: user.id,
-            guest_name: guestName,
-            guest_email: guestEmail,
-            guest_phone: guestPhone,
-            check_in: checkIn.toISOString().split("T")[0],
-            check_out: checkOut.toISOString().split("T")[0],
-            number_of_guests: numberOfGuests,
-            total_price: totalPrice,
-            status: "pending",
-          })
-          .select()
-          .single();
-        if (error) throw error;
-        created = data as CreatedBooking;
+      const res = await fetch(`${API}/bookings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          CheckIn: checkIn.toISOString(),
+          CheckOut: checkOut.toISOString(),
+          GuestName: guestName,
+          GuestEmail: guestEmail,
+          GuestPhone: guestPhone,
+          NumberOfGuests: numberOfGuests,
+          TotalPrice: totalPrice,
+        }),
+      });
+      if (res.ok) {
+        created = {
+          id: `srv-${Date.now()}`,
+          status: "pending",
+          check_in: checkIn.toISOString().split("T")[0],
+          check_out: checkOut.toISOString().split("T")[0],
+          number_of_guests: numberOfGuests,
+          total_price: totalPrice,
+        };
       }
 
       const bookingForView = created ?? {

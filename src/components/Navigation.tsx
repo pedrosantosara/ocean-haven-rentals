@@ -3,7 +3,7 @@ import { Waves, Calendar, Image, LayoutDashboard, LogOut, User, Menu } from "luc
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
+type SupabaseUser = { id?: string };
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "./ui/sheet";
 
 export const Navigation = () => {
@@ -12,36 +12,23 @@ export const Navigation = () => {
   const [isOwner, setIsOwner] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        checkOwnerStatus(session.user.id);
-      }
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        checkOwnerStatus(session.user.id);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    const token = localStorage.getItem("token");
+    setUser(token ? {} : null);
+    if (token) { checkOwnerStatus(); }
   }, []);
 
-  const checkOwnerStatus = async (userId: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("is_owner")
-      .eq("id", userId)
-      .single();
-    setIsOwner(data?.is_owner || false);
+  const checkOwnerStatus = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) { setIsOwner(false); return; }
+    const API = "http://localhost:3005";
+    const res = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { setIsOwner(false); return; }
+    const j = await res.json();
+    setIsOwner(!!j.user?.is_owner);
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem("token");
     navigate("/");
   };
 
@@ -69,20 +56,21 @@ export const Navigation = () => {
             </Link>
             {user ? (
               <>
-                {isOwner && (
+                {isOwner ? (
                   <Link to="/dashboard">
                     <Button variant="ghost" size="sm" className="gap-2">
                       <LayoutDashboard className="h-4 w-4" />
                       Dashboard
                     </Button>
                   </Link>
+                ) : (
+                  <Link to="/my-booking">
+                    <Button variant="ghost" size="sm" className="gap-2">
+                      <User className="h-4 w-4" />
+                      Minhas Reservas
+                    </Button>
+                  </Link>
                 )}
-                <Link to="/my-booking">
-                  <Button variant="ghost" size="sm" className="gap-2">
-                    <User className="h-4 w-4" />
-                    Minhas Reservas
-                  </Button>
-                </Link>
                 <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2">
                   <LogOut className="h-4 w-4" />
                   Sair
@@ -125,22 +113,23 @@ export const Navigation = () => {
                       Reservar
                     </Button>
                   </Link>
-                  {user && isOwner && (
-                    <Link to="/dashboard">
-                      <Button variant="ghost" className="w-full justify-start gap-3">
-                        <LayoutDashboard className="h-4 w-4" />
-                        Dashboard
-                      </Button>
-                    </Link>
-                  )}
                   {user ? (
                     <>
-                      <Link to="/my-booking">
-                        <Button variant="ghost" className="w-full justify-start gap-3">
-                          <User className="h-4 w-4" />
-                          Minhas Reservas
-                        </Button>
-                      </Link>
+                      {isOwner ? (
+                        <Link to="/dashboard">
+                          <Button variant="ghost" className="w-full justify-start gap-3">
+                            <LayoutDashboard className="h-4 w-4" />
+                            Dashboard
+                          </Button>
+                        </Link>
+                      ) : (
+                        <Link to="/my-booking">
+                          <Button variant="ghost" className="w-full justify-start gap-3">
+                            <User className="h-4 w-4" />
+                            Minhas Reservas
+                          </Button>
+                        </Link>
+                      )}
                       <Button variant="ghost" className="w-full justify-start gap-3" onClick={handleLogout}>
                         <LogOut className="h-4 w-4" />
                         Sair

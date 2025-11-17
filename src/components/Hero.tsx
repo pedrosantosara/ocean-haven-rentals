@@ -1,19 +1,42 @@
 import { Button } from './ui/button';
 import { ChevronDown } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import heroVideo from '@/assets/videos/video-casa.mp4';
+import posterImage from '@/assets/piscina-home.jpg';
 
 export const Hero = () => {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
   const scrollToBooking = () => {
     document.getElementById('book')?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reduce.matches) return;
+    const connection = (navigator as Navigator & { connection?: { effectiveType?: string } }).connection;
+    if (connection && connection.effectiveType && ['slow-2g', '2g'].includes(connection.effectiveType)) return;
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && !loaded) {
+        el.src = heroVideo;
+        el.play().catch(() => {});
+        setLoaded(true);
+      }
+    }, { threshold: 0.25 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loaded]);
+
   return (
     <section className='relative h-screen w-full overflow-hidden'>
-      {/* Background Video */}
       <video
+        ref={videoRef}
         className='absolute inset-0 w-full h-full object-cover'
-        src={heroVideo}
-        autoPlay
+        preload='none'
+        poster={posterImage}
         loop
         muted
         playsInline

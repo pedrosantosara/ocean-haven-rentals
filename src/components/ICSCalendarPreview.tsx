@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import * as React from 'react';
 import {
   Card,
   CardContent,
@@ -11,13 +11,16 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { parse, eachDayOfInterval, format } from 'date-fns';
+import { parse, eachDayOfInterval, format, addDays } from 'date-fns';
+import { toast } from 'sonner';
 import type { DateRange, SelectRangeEventHandler } from 'react-day-picker';
 
-function parseICS(icsText: string): DateRange[] {
+type IcsEvent = { from: Date; to: Date; source?: string; summary?: string; status?: string };
+
+function parseICS(icsText: string): IcsEvent[] {
   const lines = icsText.split(/\r?\n/);
-  const ranges: DateRange[] = [];
-  let current: { dtstart?: Date; dtend?: Date } = {};
+  const events: IcsEvent[] = [];
+  let current: { dtstart?: Date; dtend?: Date; source?: string; summary?: string; status?: string } = {};
 
   const parseIcsDate = (value: string): Date => {
     if (/^\d{8}$/.test(value)) {
@@ -51,48 +54,67 @@ function parseICS(icsText: string): DateRange[] {
       current.dtend = parseIcsDate(val);
       continue;
     }
+    if (line.startsWith('SUMMARY')) {
+      const [, val] = line.split(':');
+      current.summary = val;
+      continue;
+    }
+    if (line.startsWith('CATEGORIES')) {
+      const [, val] = line.split(':');
+      current.source = val;
+      continue;
+    }
+    if (line.startsWith('STATUS')) {
+      const [, val] = line.split(':');
+      current.status = val;
+      continue;
+    }
     if (line.startsWith('END:VEVENT')) {
       if (current.dtstart && current.dtend) {
         const inclusiveEnd = new Date(current.dtend);
         inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
-        ranges.push({ from: current.dtstart, to: inclusiveEnd });
+        events.push({ from: current.dtstart, to: inclusiveEnd, source: current.source, summary: current.summary, status: current.status });
       }
       current = {};
       continue;
     }
   }
-  return ranges;
+  return events;
 }
 
 export function ICSCalendarPreview() {
-  const [disabledRanges, setDisabledRanges] = useState<DateRange[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [months, setMonths] = useState(1);
-  const [selected, setSelected] = useState<DateRange | undefined>();
-  const [availability, setAvailability] = useState<Record<string, boolean>>({});
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [noteDraft, setNoteDraft] = useState('');
+  const [disabledRanges, setDisabledRanges] = React.useState<DateRange[]>([]);
+  const [icsEvents, setIcsEvents] = React.useState<IcsEvent[]>([]);
+  const [hoverCard, setHoverCard] = React.useState<{ x: number; y: number; items: IcsEvent[] } | null>(null);
+  const calRef = React.useRef<HTMLDivElement | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [months, setMonths] = React.useState(1);
+  const [selected, setSelected] = React.useState<DateRange | undefined>();
+  const [availability, setAvailability] = React.useState<Record<string, boolean>>({});
+  const [notes, setNotes] = React.useState<Record<string, string>>({});
+  const [noteDraft, setNoteDraft] = React.useState('');
 
-  useEffect(() => {
+  React.useEffect(() => {
     const loadIcs = async () => {
       try {
-        const res = await fetch('/export.ics');
+        const res = await fetch('http://localhost:3005/calendar/merged.ics');
         if (!res.ok) {
-          setError('Arquivo export.ics não encontrado');
           return;
         }
         const text = await res.text();
-        const ranges = parseICS(text);
+        const events = parseICS(text);
+        setIcsEvents(events);
+        const ranges = events.map((ev) => ({ from: ev.from, to: ev.to }));
         setDisabledRanges(ranges);
         setError(null);
       } catch (e) {
-        setError('Falha ao ler export.ics');
+        return;
       }
     };
     loadIcs();
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const updateMonths = () => {
       const w = window.innerWidth;
       if (w >= 1024) {
@@ -106,16 +128,128 @@ export function ICSCalendarPreview() {
     return () => window.removeEventListener('resize', updateMonths);
   }, []);
 
-  const disabled = useMemo(() => disabledRanges, [disabledRanges]);
-  const unavailableDates = useMemo(() => {
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!calRef.current) return;
+      const target = e.target as Node | null;
+      if (target && !calRef.current.contains(target)) {
+        setSelected(undefined);
+      }
+    };
+    const handlerClick = (e: MouseEvent) => {
+      if (!calRef.current) return;
+      const target = e.target as Node | null;
+      if (target && !calRef.current.contains(target)) {
+        setSelected(undefined);
+      }
+    };
+    const handlerTouch = (e: TouchEvent) => {
+      if (!calRef.current) return;
+      const target = e.target as Node | null;
+      if (target && !calRef.current.contains(target)) {
+        setSelected(undefined);
+      }
+    };
+    const handlerKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelected(undefined);
+      }
+    };
+    document.addEventListener('mousedown', handler, true);
+    document.addEventListener('click', handlerClick, true);
+    document.addEventListener('touchstart', handlerTouch, true);
+    document.addEventListener('keydown', handlerKey, true);
+    return () => {
+      document.removeEventListener('mousedown', handler, true);
+      document.removeEventListener('click', handlerClick, true);
+      document.removeEventListener('touchstart', handlerTouch, true);
+      document.removeEventListener('keydown', handlerKey, true);
+    };
+  }, []);
+
+  const normalizeSource = (ev: IcsEvent): string | undefined => {
+    const raw = (ev.source || ev.summary || '').toLowerCase();
+    if (!raw) return undefined;
+    if (raw.includes('booking')) return 'Booking';
+    if (raw.includes('airbnb')) return 'Airbnb';
+    if (raw.includes('vrbo')) return 'VRBO';
+    if (raw.includes('site') || raw.includes('reserva')) return 'Site';
+    return ev.source || ev.summary || undefined;
+  };
+  const sourcesByDay = React.useMemo(() => {
+    const map: Record<string, Set<string>> = {};
+    for (const ev of icsEvents) {
+      const src = normalizeSource(ev);
+      const days = eachDayOfInterval({ start: ev.from, end: ev.to });
+      for (const day of days) {
+        const key = format(day, 'yyyy-MM-dd');
+        if (!map[key]) map[key] = new Set();
+        if (src) map[key].add(src);
+      }
+    }
+    const out: Record<string, string[]> = {};
+    for (const [k, set] of Object.entries(map)) {
+      out[k] = Array.from(set);
+    }
+    return out;
+  }, [icsEvents]);
+  const unavailableDates = React.useMemo(() => {
     return Object.entries(availability)
       .filter(([, avail]) => avail === false)
       .map(([dateStr]) => new Date(dateStr));
   }, [availability]);
-  const notedDates = useMemo(
+  const notedDates = React.useMemo(
     () => Object.keys(notes).map((d) => new Date(d)),
     [notes]
   );
+
+  const busySets = React.useMemo(() => {
+    const start: Date[] = [];
+    const middle: Date[] = [];
+    const end: Date[] = [];
+    const all: Date[] = [];
+    for (const ev of icsEvents) {
+      const days = eachDayOfInterval({ start: ev.from, end: ev.to });
+      if (days.length === 0) continue;
+      all.push(...days);
+      if (days.length === 1) {
+        start.push(days[0]);
+        end.push(days[0]);
+      } else {
+        start.push(days[0]);
+        end.push(days[days.length - 1]);
+        for (let i = 1; i < days.length - 1; i++) middle.push(days[i]);
+      }
+    }
+    return { start, middle, end, all };
+  }, [icsEvents]);
+
+  const selectionHasBlock = React.useMemo(() => {
+    if (!selected?.from || !selected?.to) return false;
+    const start = selected.from;
+    const end = selected.to;
+    return icsEvents.some((ev) => {
+      const isBlock = (ev.source || '').toLowerCase().includes('block');
+      if (!isBlock) return false;
+      return !(end < ev.from || start > ev.to);
+    });
+  }, [selected, icsEvents]);
+
+  const selectionTouchesBlock = React.useMemo(() => {
+    if (!selected?.from || !selected?.to) return false;
+    const selStart = format(selected.from, 'yyyy-MM-dd');
+    const selEnd = format(selected.to, 'yyyy-MM-dd');
+    const nextEnd = format(addDays(selected.to, 1), 'yyyy-MM-dd');
+    const prevStart = format(addDays(selected.from, -1), 'yyyy-MM-dd');
+    return icsEvents.some((ev) => {
+      const isBlock = (ev.source || '').toLowerCase().includes('block');
+      if (!isBlock) return false;
+      const evStart = format(ev.from, 'yyyy-MM-dd');
+      const evEnd = format(ev.to, 'yyyy-MM-dd');
+      return evStart === nextEnd || evEnd === prevStart;
+    });
+  }, [selected, icsEvents]);
+
 
   const applyAvailability = (isAvailable: boolean) => {
     if (!selected?.from || !selected?.to) return;
@@ -150,13 +284,56 @@ export function ICSCalendarPreview() {
     setSelected(range);
   };
 
+  const API = 'http://localhost:3005';
+  const reloadCalendar = async () => {
+    try {
+      const res = await fetch(`${API}/calendar/merged.ics`);
+      if (!res.ok) return;
+      const text = await res.text();
+      const events = parseICS(text);
+      setIcsEvents(events);
+      const ranges = events.map((ev) => ({ from: ev.from, to: ev.to }));
+      setDisabledRanges(ranges);
+    } catch (_) { return; }
+  };
+
+  const blockRangeBackend = async (from: Date, to: Date, note?: string) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const res = await fetch(`${API}/blocks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ From: from.toISOString(), To: addDays(to, 1).toISOString(), Note: note || '' }),
+    });
+    if (!res.ok) {
+      if (res.status === 403) { toast.error('Você precisa ser proprietário para bloquear'); } else { toast.error('Erro ao bloquear período'); }
+      return;
+    }
+    toast.success('Período bloqueado');
+    await reloadCalendar();
+  };
+
+  const unblockRangeBackend = async (from: Date, to: Date) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const res = await fetch(`${API}/blocks/unblock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ From: from.toISOString(), To: addDays(to, 1).toISOString() }),
+    });
+    if (!res.ok) {
+      if (res.status === 403) { toast.error('Você precisa ser proprietário para desbloquear'); } else { toast.error('Erro ao desbloquear período'); }
+      return;
+    }
+    toast.success('Período desbloqueado');
+    await reloadCalendar();
+  };
+
   return (
-    <Card className='glass-ocean border-primary/20 mb-8 min-h-[60vh]'>
+    <Card className='glass-ocean border-primary/20 mb-8'>
       <CardHeader>
         <CardTitle>Calendário</CardTitle>
-        <CardDescription>
-          Datas ocupadas são carregadas de um arquivo ICS (export.ics)
-        </CardDescription>
+        <CardDescription>Gerencie disponibilidade e bloqueios</CardDescription>
       </CardHeader>
       <CardContent>
         <div className='flex items-center gap-2 mb-4'>
@@ -166,44 +343,34 @@ export function ICSCalendarPreview() {
               {disabledRanges.length} intervalo(s) bloqueado(s)
             </p>
           )}
-          {error && <p className='text-sm text-destructive'>{error}</p>}
-        </div>
-        <div className='mb-4'>
-          <input
-            type='file'
-            accept='.ics,text/calendar'
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              try {
-                const text = await file.text();
-                const ranges = parseICS(text);
-                setDisabledRanges(ranges);
-                setError(null);
-              } catch {
-                setError('Falha ao processar o arquivo ICS');
-              }
-            }}
-            className='text-sm'
-          />
-          <p className='text-xs text-muted-foreground mt-1'>
-            Carregue um arquivo .ics para atualizar as datas ocupadas
-          </p>
         </div>
         <div className='grid grid-cols-1 lg:grid-cols-[70%_30%] gap-4'>
-          <div className='w-full min-w-0 overflow-hidden'>
+          <div ref={calRef} className='relative w-full min-w-0 overflow-visible'>
             <Calendar
               className='w-full'
-              disabled={disabled}
               showOutsideDays
               numberOfMonths={months}
               mode='range'
               selected={selected}
               onSelect={handleRangeSelect}
-              modifiers={{ unavailable: unavailableDates, noted: notedDates }}
+              modifiers={{
+                unavailable: unavailableDates,
+                noted: notedDates,
+                busyStart: busySets.start,
+                busyMiddle: busySets.middle,
+                busyEnd: busySets.end,
+                busy: busySets.all,
+              }}
               modifiersClassNames={{
-                unavailable: 'bg-destructive/30 text-destructive-foreground',
+                unavailable: '',
                 noted: 'ring-2 ring-accent',
+                busy: '',
+                busyMiddle:
+                  'relative before:absolute before:left-1 before:right-1 before:top-1/2 before:h-[2px] before:bg-destructive before:opacity-100 before:pointer-events-none',
+                busyStart:
+                  'relative before:absolute before:left-1/2 before:right-1 before:top-1/2 before:h-[2px] before:bg-destructive before:opacity-100 before:pointer-events-none',
+                busyEnd:
+                  'relative before:absolute before:left-1 before:right-1/2 before:top-1/2 before:h-[2px] before:bg-destructive before:opacity-100 before:pointer-events-none',
               }}
               classNames={{
                 months: 'grid grid-cols-1 md:grid-cols-2 gap-4',
@@ -214,7 +381,81 @@ export function ICSCalendarPreview() {
                 cell: 'h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 text-center text-sm p-0 relative',
                 day: 'h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 p-0 font-normal',
               }}
+              components={{
+                DayContent: ({ date }) => {
+                  const label = date.getDate();
+                  const key = format(date, 'yyyy-MM-dd');
+                  const srcs = sourcesByDay[key] || [];
+                  const items = icsEvents.filter((ev) => date >= ev.from && date <= ev.to);
+                  return (
+                    <div
+                      className='relative w-full h-full flex items-center justify-center'
+                      onMouseEnter={(e) => {
+                        if (items.length === 0) return;
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const containerRect = calRef.current?.getBoundingClientRect();
+                        if (!containerRect) return;
+                        const x = rect.left - containerRect.left + rect.width / 2;
+                        const y = rect.top - containerRect.top - 8;
+                        setHoverCard({ x, y, items });
+                      }}
+                      onMouseMove={(e) => {
+                        if (!hoverCard || items.length === 0) return;
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const containerRect = calRef.current?.getBoundingClientRect();
+                        if (!containerRect) return;
+                        const x = rect.left - containerRect.left + rect.width / 2;
+                        const y = rect.top - containerRect.top - 8;
+                        setHoverCard({ x, y, items });
+                      }}
+                      onMouseLeave={() => {
+                        setHoverCard(null);
+                      }}
+                    >
+                      <span>{label}</span>
+                      {srcs.length > 0 && (
+                        <div className='absolute inset-x-1 bottom-1 flex gap-1 justify-center pointer-events-none'>
+                          {srcs.slice(0, 2).map((s) => (
+                            <span
+                              key={s}
+                              className={
+                                s === 'Booking'
+                                  ? 'px-1 rounded text-[10px] bg-destructive/30 text-destructive-foreground'
+                                  : 'px-1 rounded text-[10px] bg-primary/20 text-primary'
+                              }
+                            >
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                },
+              }}
             />
+            {hoverCard && (
+              <div
+                style={{ position: 'absolute', left: hoverCard.x, top: hoverCard.y, transform: 'translate(-50%, -100%)' }}
+                className='z-50 rounded-md border border-border bg-white p-2 text-xs shadow-xl'
+                onMouseLeave={() => setHoverCard(null)}
+              >
+                <div className='grid gap-2 min-w-[220px]'>
+                  {hoverCard.items.slice(0, 4).map((ev, idx) => (
+                    <div key={idx} className='rounded-md border border-border bg-white p-2 shadow'>
+                      <div className='flex items-center justify-between'>
+                        <span className='font-medium'>{ev.summary || ((ev.source || '').toLowerCase().includes('site') ? 'Reserva' : 'Evento')}</span>
+                        <Badge variant='secondary'>{normalizeSource(ev) || '—'}</Badge>
+                      </div>
+                      <div className='mt-1 text-muted-foreground'>
+                        {format(ev.from, 'dd/MM/yyyy')} — {format(ev.to, 'dd/MM/yyyy')}
+                      </div>
+                      {ev.status && <div className='mt-1'>Status: {ev.status}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className='w-full min-w-0'>
@@ -232,16 +473,21 @@ export function ICSCalendarPreview() {
                     className='scale-90'
                     checked={(() => {
                       if (!selected?.from || !selected?.to) return true;
-                      const days = eachDayOfInterval({
-                        start: selected.from,
-                        end: selected.to,
-                      });
-                      const vals = days.map(
-                        (d) => availability[format(d, 'yyyy-MM-dd')] ?? true
-                      );
-                      return vals.every((v) => v);
+                      const days = eachDayOfInterval({ start: selected.from, end: selected.to });
+                      const blocked = days.some((day) => icsEvents.some((ev) => (ev.source || '').toLowerCase().includes('block') && day >= ev.from && day <= ev.to));
+                      return !blocked;
                     })()}
-                    onCheckedChange={(checked) => applyAvailability(checked)}
+                    onCheckedChange={async (checked) => {
+                      if (!selected?.from || !selected?.to) return;
+                      if (!checked) {
+                        await blockRangeBackend(selected.from, selected.to, noteDraft.trim() || undefined);
+                      } else {
+                        const useAdj = !selectionHasBlock && selectionTouchesBlock;
+                        const f = useAdj ? addDays(selected.from, -1) : selected.from;
+                        const t = useAdj ? addDays(selected.to, 1) : selected.to;
+                        await unblockRangeBackend(f, t);
+                      }
+                    }}
                   />
                 </div>
 
@@ -249,10 +495,26 @@ export function ICSCalendarPreview() {
                   variant='gradient'
                   size='sm'
                   className='shadow-ocean'
-                  onClick={blockSelectedRange}
+                  onClick={async () => { if (!selected?.from || !selected?.to) return; await blockRangeBackend(selected.from, selected.to, noteDraft.trim() || undefined); }}
                   disabled={!selected?.from || !selected?.to}
                 >
                   Bloquear período selecionado
+                </Button>
+
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='shadow-ocean'
+                  onClick={async () => {
+                    if (!selected?.from || !selected?.to) return;
+                    const useAdj = !selectionHasBlock && selectionTouchesBlock;
+                    const f = useAdj ? addDays(selected.from, -1) : selected.from;
+                    const t = useAdj ? addDays(selected.to, 1) : selected.to;
+                    await unblockRangeBackend(f, t);
+                  }}
+                  disabled={!selected?.from || !selected?.to || (!selectionHasBlock && !selectionTouchesBlock)}
+                >
+                  Desbloquear período selecionado
                 </Button>
 
                 <div className='space-y-2'>

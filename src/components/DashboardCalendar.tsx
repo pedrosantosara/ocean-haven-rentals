@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, parseISO, isWithinInterval } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { supabase } from "@/integrations/supabase/client";
+// API via backend Go
 import { toast } from "sonner";
 
 interface Booking {
@@ -15,10 +15,11 @@ interface Booking {
   guest_email: string;
   check_in: string;
   check_out: string;
-  total_price: string;
+  total_price: number;
   status: "pending" | "confirmed" | "cancelled" | "completed";
   number_of_guests: number;
 }
+interface Message { id: number; booking_id: string; sender_email: string; is_from_owner: boolean; message: string; created_at: string }
 
 interface DashboardCalendarProps {
   bookings: Booking[];
@@ -29,6 +30,9 @@ export function DashboardCalendar({ bookings, onUpdate }: DashboardCalendarProps
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [showDialog, setShowDialog] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [reply, setReply] = useState("");
+  const API = "http://localhost:3005";
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -48,20 +52,38 @@ export function DashboardCalendar({ bookings, onUpdate }: DashboardCalendarProps
 
   const updateBookingStatus = async (
     bookingId: string,
-    status: "pending" | "confirmed" | "cancelled" | "completed"
+    status: "confirmed" | "cancelled"
   ) => {
-    const { error } = await supabase
-      .from("bookings")
-      .update({ status })
-      .eq("id", bookingId);
+    const token = localStorage.getItem("token");
+    if (!token) { toast.error("Faça login como proprietário"); return; }
+    const endpoint = status === "confirmed" ? `${API}/bookings/${bookingId}/approve` : `${API}/bookings/${bookingId}/reject`;
+    const res = await fetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { toast.error("Erro ao atualizar status"); return; }
+    toast.success("Status atualizado");
+    setShowDialog(false);
+    onUpdate();
+  };
 
-    if (error) {
-      toast.error("Erro ao atualizar status");
-    } else {
-      toast.success("Status atualizado com sucesso");
-      setShowDialog(false);
-      onUpdate();
-    }
+  const loadMessages = async (bookingId: string) => {
+    const token = localStorage.getItem("token");
+    if (!token) { setMessages([]); return; }
+    const res = await fetch(`${API}/messages?booking_id=${bookingId}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) { const j = await res.json(); setMessages(j.data || []); }
+  };
+
+  const sendReply = async () => {
+    if (!selectedBooking || !reply.trim()) return;
+    const token = localStorage.getItem("token");
+    if (!token) { toast.error("Faça login como proprietário"); return; }
+    const res = await fetch(`${API}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ BookingID: selectedBooking.id, Message: reply }),
+    });
+    if (!res.ok) { toast.error("Erro ao enviar mensagem"); return; }
+    setReply("");
+    await loadMessages(selectedBooking.id);
+    toast.success("Mensagem enviada");
   };
 
   const getStatusColor = (status: string) => {
@@ -159,6 +181,7 @@ export function DashboardCalendar({ bookings, onUpdate }: DashboardCalendarProps
                         onClick={() => {
                           setSelectedBooking(booking);
                           setShowDialog(true);
+                          loadMessages(booking.id);
                         }}
                         className={`w-full text-left px-2 py-1 rounded text-xs ${getStatusColor(
                           booking.status
@@ -215,7 +238,7 @@ export function DashboardCalendar({ bookings, onUpdate }: DashboardCalendarProps
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Valor Total</p>
-                  <p className="font-semibold">R$ {parseFloat(selectedBooking.total_price).toFixed(2)}</p>
+                  <p className="font-semibold">R$ {Number(selectedBooking.total_price).toFixed(2)}</p>
                 </div>
               </div>
 
@@ -228,22 +251,32 @@ export function DashboardCalendar({ bookings, onUpdate }: DashboardCalendarProps
 
               <div className="flex gap-2 pt-4">
                 {selectedBooking.status === "pending" && (
-                  <Button
-                    onClick={() => updateBookingStatus(selectedBooking.id, "confirmed")}
-                    className="flex-1"
-                  >
-                    Confirmar
+                  <Button onClick={() => updateBookingStatus(selectedBooking.id, "confirmed")} className="flex-1">
+                    Aprovar
                   </Button>
                 )}
                 {selectedBooking.status !== "cancelled" && (
-                  <Button
-                    variant="destructive"
-                    onClick={() => updateBookingStatus(selectedBooking.id, "cancelled")}
-                    className="flex-1"
-                  >
-                    Cancelar
+                  <Button variant="destructive" onClick={() => updateBookingStatus(selectedBooking.id, "cancelled")} className="flex-1">
+                    Rejeitar
                   </Button>
                 )}
+              </div>
+
+              <div className="pt-6 space-y-3">
+                <p className="text-sm text-muted-foreground">Mensagens</p>
+                <div className="max-h-48 overflow-auto space-y-2">
+                  {messages.map((m) => (
+                    <div key={m.id} className={`p-2 rounded text-sm ${m.is_from_owner ? "bg-primary/10" : "bg-muted"}`}>
+                      <div className="text-xs text-muted-foreground">{format(parseISO(m.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</div>
+                      <div>{m.message}</div>
+                    </div>
+                  ))}
+                  {messages.length === 0 && <div className="text-sm text-muted-foreground">Sem mensagens</div>}
+                </div>
+                <div className="flex gap-2">
+                  <input className="flex-1 px-3 py-2 rounded border bg-background" placeholder="Escreva uma mensagem" value={reply} onChange={(e) => setReply(e.target.value)} />
+                  <Button onClick={sendReply}>Enviar</Button>
+                </div>
               </div>
             </div>
           )}

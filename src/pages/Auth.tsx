@@ -16,6 +16,35 @@ export default function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const API = "http://localhost:3005";
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const url = isLogin ? `${API}/auth/login` : `${API}/auth/register`;
+      const body = isLogin
+        ? { Email: email, Password: password }
+        : { Email: email, Password: password, FullName: fullName, IsOwner: false };
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.token) {
+        toast.error("Falha na autenticação");
+        return;
+      }
+      localStorage.setItem("token", data.token);
+      toast.success("Autenticado");
+      navigate("/dashboard");
+    } catch {
+      toast.error("Erro de rede");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-primary/5 to-accent/10">
@@ -32,7 +61,7 @@ export default function Auth() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="space-y-4">
+          <form className="space-y-4" onSubmit={handleSubmit}>
             {!isLogin && (
               <div className="space-y-2">
                 <Label htmlFor="fullName">Nome Completo</Label>

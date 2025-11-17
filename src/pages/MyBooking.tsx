@@ -69,23 +69,34 @@ export default function MyBooking() {
   };
 
   const loadBookingAndMessages = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    const { data: bookingData } = await supabase
-      .from('bookings')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-    if (bookingData) {
-      setBooking(bookingData as Booking);
-      loadMessages(bookingData.id);
+    const token = localStorage.getItem('token');
+    if (!token) { setLoading(false); return; }
+    const API = 'http://localhost:3005';
+    const res = await fetch(`${API}/bookings/mine`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) {
+      const j = await res.json();
+      const rows = (j.data || []) as unknown[];
+      const raw = rows[0] as Record<string, unknown> | undefined;
+      if (raw) {
+        const mapStatus = (s: unknown): Booking['status'] => {
+          switch (s) {
+            case 'approved': return 'confirmed';
+            case 'rejected': return 'cancelled';
+            case 'requested': return 'pending';
+            default: return 'pending';
+          }
+        };
+        const latest: Booking = {
+          id: String(raw.ID ?? raw.id ?? ''),
+          status: mapStatus(raw.Status ?? raw.status),
+          check_in: String(raw.CheckIn ?? raw.check_in ?? ''),
+          check_out: String(raw.CheckOut ?? raw.check_out ?? ''),
+          number_of_guests: Number(raw.NumberOfGuests ?? raw.number_of_guests ?? 0),
+          total_price: Number(raw.TotalPrice ?? raw.total_price ?? 0),
+        };
+        setBooking(latest);
+        loadMessages(latest.id);
+      }
     }
     setLoading(false);
   }, []);
@@ -101,36 +112,27 @@ export default function MyBooking() {
   }, [loadBookingAndMessages, location.state]);
 
   const loadMessages = async (bookingId: string) => {
-    const { data } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('booking_id', bookingId)
-      .order('created_at', { ascending: true });
-
-    setMessages(data || []);
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const API = 'http://localhost:3005';
+    const res = await fetch(`${API}/messages?booking_id=${bookingId}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) { const j = await res.json(); setMessages(j.data || []); }
   };
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !booking) return;
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    const { error } = await supabase.from('messages').insert({
-      booking_id: booking.id,
-      sender_id: user?.id,
-      message: newMessage,
-      is_from_owner: false,
+    const token = localStorage.getItem('token');
+    if (!token) { toast.error('Faça login'); return; }
+    const API = 'http://localhost:3005';
+    const res = await fetch(`${API}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ BookingID: booking.id, Message: newMessage }),
     });
-
-    if (error) {
-      toast.error('Erro ao enviar mensagem');
-    } else {
-      setNewMessage('');
-      loadMessages(booking.id);
-      toast.success('Mensagem enviada!');
-    }
+    if (!res.ok) { toast.error('Erro ao enviar mensagem'); return; }
+    setNewMessage('');
+    loadMessages(booking.id);
+    toast.success('Mensagem enviada!');
   };
 
   const getStatusBadge = (status: Booking['status']) => {
