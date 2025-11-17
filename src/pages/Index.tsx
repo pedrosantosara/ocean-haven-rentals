@@ -1,6 +1,7 @@
 import { Navigation } from "@/components/Navigation";
 import { Hero } from "@/components/Hero";
 import { BookingCalendar } from "@/components/BookingCalendar";
+import { Footer } from "@/components/Footer";
 
 const Index = () => {
   return (
@@ -37,6 +38,7 @@ const Index = () => {
           </div>
         </div>
       </section>
+      <Footer />
     </div>
   );
 };

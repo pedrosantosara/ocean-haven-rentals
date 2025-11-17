@@ -101,7 +101,7 @@ export const BookingCalendar = () => {
 
   return (
     <section id="book" className="py-20 px-4">
-      <div className="container mx-auto">
+      <div className="container mx-auto rounded-xl border border-primary/20 bg-card/40 pb-6 pt-6 shadow-ocean">
         <h2 className="text-4xl font-bold text-center mb-12 text-gradient">
           Reserve Sua Estadia
         </h2>
@@ -136,7 +136,7 @@ export const BookingCalendar = () => {
             </CardContent>
           </Card>
 
-          <Card className="glass-ocean border-primary/20 w-full mt-6 md:mt-0">
+          <Card className="glass-ocean w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean">
             <CardHeader>
               <CardTitle>Informações do Hóspede</CardTitle>
               <CardDescription>Preencha seus dados</CardDescription>

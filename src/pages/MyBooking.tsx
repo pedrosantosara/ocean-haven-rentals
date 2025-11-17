@@ -21,6 +21,8 @@ import {
   PopoverContent,
 } from '@/components/ui/popover';
 import { Send } from 'lucide-react';
+import { Footer } from '@/components/Footer';
+import casaVideo from '@/assets/videos/video-casa.mp4';
 
 export default function MyBooking() {
   const navigate = useNavigate();
@@ -212,31 +214,35 @@ export default function MyBooking() {
               <div className='grid md:grid-cols-2 gap-6 items-stretch'>
                 <div className='md:h-full'>
                   <div className='relative h-full min-h-[12rem] md:min-h-[16rem] rounded-lg overflow-hidden bg-muted'>
-                    <img
-                      src='https://images.unsplash.com/photo-1505691938895-1758d7feb511?auto=format&fit=crop&w=1200&q=60'
-                      alt='Acomodação'
+                    <video
+                      src={casaVideo}
                       className='w-full h-full object-cover'
+                      autoPlay
+                      muted
+                      loop
+                      playsInline
+                      preload='metadata'
                     />
-                  </div>
-                  <div className='mt-3'>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          className='shadow-ocean'
-                        >
-                          Mais detalhes
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className='w-64'>
-                        <div className='space-y-2 text-sm'>
-                          <p>Suíte premium com vista para o mar.</p>
-                          <p>Check-in a partir das 14h, check-out até 11h.</p>
-                          <p>Itens incluídos: roupa de cama, Wi‑Fi, limpeza.</p>
-                        </div>
-                      </PopoverContent>
-                    </Popover>
+                    <div className='absolute bottom-3 right-3'>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            className='shadow-ocean bg-background/70 backdrop-blur-sm'
+                          >
+                            Mais detalhes
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent side='top' align='end' className='w-64'>
+                          <div className='space-y-2 text-sm'>
+                            <p>Suíte premium com vista para o mar.</p>
+                            <p>Check-in a partir das 14h, check-out até 11h.</p>
+                            <p>Itens incluídos: roupa de cama, Wi‑Fi, limpeza.</p>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                   </div>
                 </div>
                 <div>
@@ -388,6 +394,7 @@ export default function MyBooking() {
           </Card>
         </div>
       </div>
+      <Footer />
     </div>
   );
 }

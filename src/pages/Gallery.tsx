@@ -2,6 +2,7 @@ import { Navigation } from "@/components/Navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useState } from "react";
+import { Footer } from "@/components/Footer";
 
 // 🔹 Importa automaticamente todas as imagens por pasta
 const imageImports = import.meta.glob("@/assets/images/**/*.{jpg,jpeg,png,webp}", {
@@ -89,10 +90,19 @@ export default function Gallery() {
           </p>
 
           <Tabs value={active} onValueChange={(v) => setActive(v as RoomType)} className="w-full">
-            <TabsList className="flex flex-wrap justify-center mb-8 bg-card/40 backdrop-blur-sm p-2 rounded-2xl">
-              <TabsTrigger value="all">Todos</TabsTrigger>
+            <TabsList className="flex overflow-x-auto md:overflow-x-visible flex-nowrap md:flex-wrap justify-start md:justify-center h-auto mb-8 bg-card/40 backdrop-blur-sm p-2 rounded-2xl gap-2">
+              <TabsTrigger
+                value="all"
+                className="shrink-0 md:shrink data-[state=active]:bg-gradient-ocean data-[state=active]:text-white data-[state=active]:shadow-ocean"
+              >
+                Todos
+              </TabsTrigger>
               {roomSections.map((room) => (
-                <TabsTrigger key={room.key} value={room.key}>
+                <TabsTrigger
+                  key={room.key}
+                  value={room.key}
+                  className="shrink-0 md:shrink data-[state=active]:bg-gradient-ocean data-[state=active]:text-white data-[state=active]:shadow-ocean"
+                >
                   {room.name}
                 </TabsTrigger>
               ))}
@@ -128,6 +138,7 @@ export default function Gallery() {
           </Tabs>
         </div>
       </div>
+      <Footer />
     </div>
   );
 }
