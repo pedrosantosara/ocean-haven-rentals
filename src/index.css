@@ -172,4 +172,20 @@ All colors MUST be HSL.
   .animate-ripple {
     animation: ripple 2s ease-out infinite;
   }
+  
+  @keyframes glow {
+    0% {
+      box-shadow: 0 0 0 0 hsl(var(--ring) / 0);
+    }
+    50% {
+      box-shadow: 0 0 0 8px hsl(var(--ring) / 0.25);
+    }
+    100% {
+      box-shadow: 0 0 0 0 hsl(var(--ring) / 0);
+    }
+  }
+
+  .animate-glow {
+    animation: glow 1.5s ease-in-out;
+  }
 }

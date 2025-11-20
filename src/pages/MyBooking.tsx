@@ -33,6 +33,8 @@ export default function MyBooking() {
     check_in: string;
     check_out: string;
     number_of_guests: number;
+    subtotal_price?: number | string;
+    discount_amount?: number | string;
     total_price: number | string;
   };
   type LocationState = { booking?: Booking };
@@ -94,6 +96,8 @@ export default function MyBooking() {
           check_in: String(raw.CheckIn ?? raw.check_in ?? ''),
           check_out: String(raw.CheckOut ?? raw.check_out ?? ''),
           number_of_guests: Number(raw.NumberOfGuests ?? raw.number_of_guests ?? 0),
+          subtotal_price: Number(raw.SubtotalPrice ?? raw.subtotal_price ?? 0),
+          discount_amount: Number(raw.DiscountAmount ?? raw.discount_amount ?? 0),
           total_price: Number(raw.TotalPrice ?? raw.total_price ?? 0),
         };
         setBooking(latest);
@@ -246,9 +250,9 @@ export default function MyBooking() {
                   </div>
                 </div>
                 <div>
-                  <div className='grid sm:grid-cols-2 gap-4'>
-                    <div>
-                      <p className='text-sm text-muted-foreground'>Check-in</p>
+                      <div className='grid sm:grid-cols-2 gap-4'>
+                        <div>
+                          <p className='text-sm text-muted-foreground'>Check-in</p>
                       <p className='font-bold'>
                         {format(
                           new Date(booking.check_in),
@@ -275,57 +279,51 @@ export default function MyBooking() {
                       <p className='text-sm text-muted-foreground'>Hóspedes</p>
                       <p className='font-bold'>{booking.number_of_guests}</p>
                     </div>
-                  </div>
-                  <div className='mt-6 w-full'>
-                    <div className='flex flex-col md:flex-row md:items-end md:justify-between gap-3'>
-                      <div>
-                        <p className='text-sm text-muted-foreground'>
-                          Valor Total
-                        </p>
-                        <p className='font-bold text-primary text-xl'>
-                          R${' '}
-                          {(typeof booking.total_price === 'string'
-                            ? parseFloat(booking.total_price)
-                            : booking.total_price
-                          ).toFixed(2)}
-                        </p>
                       </div>
-                    </div>
-                    <div className='mt-6 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
-                      <p className='text-sm md:text-base font-semibold text-muted-foreground tracking-wide'>
-                        Price details
-                      </p>
-                      <div className='mt-3 space-y-2'>
-                        <div className='flex items-center justify-between'>
-                          <span className='text-sm md:text-base'>
-                            15 nights x R$6,241.76
-                          </span>
-                          <span className='text-sm md:text-base font-medium'>
-                            R$93,626.40
-                          </span>
+                      <div className='mt-6 w-full'>
+                        <div className='flex flex-col md:flex-row md:items-end md:justify-between gap-3'>
                         </div>
-                        <div className='flex items-center justify-between'>
-                          <span className='text-sm md:text-base'>
-                            Weekly stay discount
-                          </span>
-                          <span className='text-sm md:text-base font-medium text-green-600'>
-                            -R$2,430.00
-                          </span>
-                        </div>
-                        <div className='border-t border-primary/20 my-3' />
-                        <div className='flex items-center justify-between'>
-                          <span className='text-sm md:text-base font-semibold'>
-                            Total (BRL)
-                          </span>
-                          <span className='text-lg md:text-xl font-bold'>
-                            R$91,196.40
-                          </span>
-                        </div>
-                        <Button
-                          onClick={handlePay}
-                          className='w-full shadow-ocean mx-auto'
-                          variant='gradient'
-                        >
+                        <div className='mt-6 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
+                          <p className='text-sm md:text-base font-semibold text-muted-foreground tracking-wide'>
+                            Price details
+                          </p>
+                          <div className='mt-3 space-y-2'>
+                            <div className='flex items-center justify-between text-sm text-muted-foreground'>
+                              <span>Hóspedes</span>
+                              <span className='font-medium'>{booking.number_of_guests}</span>
+                            </div>
+                            <div className='flex items-center justify-between text-sm text-muted-foreground'>
+                              <span>Subtotal</span>
+                              <span className='font-medium'>
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
+                                  typeof booking.subtotal_price === 'string' ? parseFloat(booking.subtotal_price) : (booking.subtotal_price ?? 0)
+                                )}
+                              </span>
+                            </div>
+                            <div className='flex items-center justify-between text-sm text-green-600'>
+                              <span>Desconto</span>
+                              <span className='font-medium'>
+                                -{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
+                                  typeof booking.discount_amount === 'string' ? parseFloat(booking.discount_amount) : (booking.discount_amount ?? 0)
+                                )}
+                              </span>
+                            </div>
+                            <div className='border-t border-primary/20 my-3' />
+                            <div className='flex items-center justify-between'>
+                              <span className='text-sm md:text-base font-semibold'>
+                                Total (BRL)
+                              </span>
+                              <span className='text-2xl md:text-3xl font-extrabold text-gradient'>
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
+                                  typeof booking.total_price === 'string' ? parseFloat(booking.total_price) : booking.total_price
+                                )}
+                              </span>
+                            </div>
+                            <Button
+                              onClick={handlePay}
+                              className='w-full shadow-ocean mx-auto'
+                              variant='gradient'
+                            >
                           Processar Pagamento
                         </Button>
                       </div>

@@ -3,7 +3,9 @@ package main
 import (
     "context"
     "encoding/json"
+    "errors"
     "io"
+    "log"
     "net/http"
     "os"
     "regexp"
@@ -11,6 +13,8 @@ import (
     "time"
     "github.com/golang-jwt/jwt/v5"
     "github.com/gorilla/mux"
+    "github.com/gorilla/websocket"
+    "github.com/jackc/pgx/v5"
     "github.com/jackc/pgx/v5/pgxpool"
     "github.com/joho/godotenv"
     "golang.org/x/crypto/bcrypt"
@@ -19,6 +23,7 @@ import (
 type Server struct {
     pool *pgxpool.Pool
     jwtSecret string
+    hub *Hub
 }
 
 func jsonResp(w http.ResponseWriter, code int, v any) {
@@ -56,7 +61,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
     if body.Email == "" || body.Password == "" { jsonResp(w, 400, map[string]string{"error":"invalid_input"}); return }
     hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), 10)
     _, err := s.pool.Exec(r.Context(), "INSERT INTO users (email, password_hash, full_name, is_owner) VALUES ($1,$2,$3,$4)", body.Email, string(hash), body.FullName, body.IsOwner)
-    if err != nil { jsonResp(w, 409, map[string]string{"error":"email_exists"}); return }
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"email": body.Email, "is_owner": body.IsOwner, "exp": time.Now().Add(7*24*time.Hour).Unix()})
     str, _ := token.SignedString([]byte(s.jwtSecret))
     jsonResp(w, 200, map[string]string{"token": str})
@@ -67,7 +72,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
     _ = json.NewDecoder(r.Body).Decode(&body)
     var email string; var hash string; var isOwner bool
     err := s.pool.QueryRow(r.Context(), "SELECT email, password_hash, is_owner FROM users WHERE email=$1", body.Email).Scan(&email, &hash, &isOwner)
-    if err != nil { jsonResp(w, 401, map[string]string{"error":"invalid_credentials"}); return }
+    if err != nil {
+        if errors.Is(err, pgx.ErrNoRows) { jsonResp(w, 401, map[string]string{"error":"invalid_credentials"}); return }
+        jsonResp(w, 500, map[string]string{"error": err.Error()}); return
+    }
     if bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil { jsonResp(w, 401, map[string]string{"error":"invalid_credentials"}); return }
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"email": email, "is_owner": isOwner, "exp": time.Now().Add(7*24*time.Hour).Unix()})
     str, _ := token.SignedString([]byte(s.jwtSecret))
@@ -83,7 +91,7 @@ func getClaims(r *http.Request) jwt.MapClaims {
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
     c := getClaims(r)
     var fullName string; var isOwner bool
-    _ = s.pool.QueryRow(r.Context(), "SELECT full_name, is_owner FROM users WHERE email=$1", c["email"]).Scan(&fullName, &isOwner)
+    _ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(full_name,'') AS full_name, COALESCE(is_owner,false) AS is_owner FROM users WHERE email=$1", c["email"]).Scan(&fullName, &isOwner)
     jsonResp(w, 200, map[string]any{"user": map[string]any{"email": c["email"], "full_name": fullName, "is_owner": isOwner}})
 }
 
@@ -91,30 +99,33 @@ func (s *Server) handleAddIcal(w http.ResponseWriter, r *http.Request) {
     var body struct{ Platform, Url string }
     _ = json.NewDecoder(r.Body).Decode(&body)
     if body.Platform == "" || body.Url == "" { jsonResp(w, 400, map[string]string{"error":"invalid_input"}); return }
-    _, _ = s.pool.Exec(r.Context(), "INSERT INTO icals (platform, url) VALUES ($1,$2)", body.Platform, body.Url)
+    if _, err := s.pool.Exec(r.Context(), "INSERT INTO icals (platform, url) VALUES ($1,$2)", body.Platform, body.Url); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     jsonResp(w, 200, map[string]bool{"success": true})
 }
 
 func (s *Server) handleListIcal(w http.ResponseWriter, r *http.Request) {
-    rows, _ := s.pool.Query(r.Context(), "SELECT id, platform, url, created_at FROM icals ORDER BY created_at DESC")
+    rows, err := s.pool.Query(r.Context(), "SELECT id, platform, url, COALESCE(created_at, now()) AS created_at FROM icals ORDER BY created_at DESC")
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     type rec struct{ ID int64 `json:"id"`; Platform string `json:"platform"`; Url string `json:"url"`; CreatedAt time.Time `json:"created_at"` }
     var out []rec
-    for rows.Next() { var a rec; _ = rows.Scan(&a.ID,&a.Platform,&a.Url,&a.CreatedAt); out = append(out,a) }
+    for rows.Next() { var a rec; if err := rows.Scan(&a.ID,&a.Platform,&a.Url,&a.CreatedAt); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return } ; out = append(out,a) }
+    if rows.Err() != nil { jsonResp(w, 500, map[string]string{"error": rows.Err().Error()}); return }
     jsonResp(w, 200, map[string]any{"data": out})
 }
 
 func (s *Server) handleDeleteIcal(w http.ResponseWriter, r *http.Request) {
     id := mux.Vars(r)["id"]
-    _, _ = s.pool.Exec(r.Context(), "DELETE FROM icals WHERE id=$1", id)
+    if _, err := s.pool.Exec(r.Context(), "DELETE FROM icals WHERE id=$1", id); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     jsonResp(w, 200, map[string]bool{"success": true})
 }
 
 func (s *Server) handleMergedICS(w http.ResponseWriter, r *http.Request) {
     var vevents []string
-    rows, _ := s.pool.Query(r.Context(), "SELECT platform, url FROM icals")
+    rows, err := s.pool.Query(r.Context(), "SELECT platform, url FROM icals")
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     for rows.Next() {
         var platform, u string
-        _ = rows.Scan(&platform, &u)
+        if err := rows.Scan(&platform, &u); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
         resp, err := http.Get(u)
         if err != nil { continue }
         body, err := io.ReadAll(resp.Body)
@@ -124,10 +135,11 @@ func (s *Server) handleMergedICS(w http.ResponseWriter, r *http.Request) {
         vevents = append(vevents, evs...)
     }
     // Include manual blocks
-    bl, _ := s.pool.Query(r.Context(), "SELECT id, from_ts, to_ts, note FROM blocks")
+    bl, err := s.pool.Query(r.Context(), "SELECT id, from_ts, to_ts, COALESCE(note,'') AS note FROM blocks")
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     for bl.Next() {
         var id int64; var from, to time.Time; var note string
-        _ = bl.Scan(&id, &from, &to, &note)
+        if err := bl.Scan(&id, &from, &to, &note); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
         var sb strings.Builder
         sb.WriteString("BEGIN:VEVENT\n")
         sb.WriteString("UID:block-" + time.UnixMilli(time.Now().UnixMilli()).Format("20060102150405") + "-" + time.Now().Format("150405") + "\n")
@@ -139,10 +151,12 @@ func (s *Server) handleMergedICS(w http.ResponseWriter, r *http.Request) {
         sb.WriteString("END:VEVENT\n")
         vevents = append(vevents, sb.String())
     }
-    bro, _ := s.pool.Query(r.Context(), "SELECT id, guest_name, check_in, check_out, status FROM bookings")
+    bro, err := s.pool.Query(r.Context(), "SELECT id, COALESCE(guest_name,'') AS guest_name, check_in, check_out, COALESCE(status,'requested') AS status FROM bookings")
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     for bro.Next() {
         var id, guest, status string; var ci, co time.Time
-        _ = bro.Scan(&id,&guest,&ci,&co,&status)
+        if err := bro.Scan(&id,&guest,&ci,&co,&status); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+        if status == "rejected" { continue }
         var sb strings.Builder
         sb.WriteString("BEGIN:VEVENT\n")
         sb.WriteString("UID:" + id + "\n")
@@ -183,51 +197,55 @@ func extractEventsFromICSWithCategory(s, category string) []string {
 
 func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
     c := getClaims(r)
-    var body struct{ CheckIn, CheckOut string; GuestName, GuestEmail, GuestPhone string; NumberOfGuests int; TotalPrice float64 }
+    var body struct{ CheckIn, CheckOut string; GuestName, GuestEmail, GuestPhone string; NumberOfGuests int; SubtotalPrice float64; DiscountAmount float64; TotalPrice float64 }
     _ = json.NewDecoder(r.Body).Decode(&body)
     if body.CheckIn == "" || body.CheckOut == "" || body.GuestName == "" || body.GuestEmail == "" { jsonResp(w, 400, map[string]string{"error":"invalid_input"}); return }
-    _, _ = s.pool.Exec(r.Context(), "INSERT INTO bookings (user_email,status,check_in,check_out,guest_name,guest_email,guest_phone,number_of_guests,total_price) VALUES ($1,'requested',$2,$3,$4,$5,$6,$7,$8)", c["email"], body.CheckIn, body.CheckOut, body.GuestName, body.GuestEmail, body.GuestPhone, body.NumberOfGuests, body.TotalPrice)
+    if _, err := s.pool.Exec(r.Context(), "INSERT INTO bookings (user_email,status,check_in,check_out,guest_name,guest_email,guest_phone,number_of_guests,subtotal_price,discount_amount,total_price) VALUES ($1,'requested',$2,$3,$4,$5,$6,$7,$8,$9,$10)", c["email"], body.CheckIn, body.CheckOut, body.GuestName, body.GuestEmail, body.GuestPhone, body.NumberOfGuests, body.SubtotalPrice, body.DiscountAmount, body.TotalPrice); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     jsonResp(w, 200, map[string]string{"status":"requested"})
 }
 
 func (s *Server) handleListBookingsOwner(w http.ResponseWriter, r *http.Request) {
     c := getClaims(r)
     var isOwner bool
-    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+    if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
-    rows, _ := s.pool.Query(r.Context(), "SELECT id, user_email, status, check_in, check_out, guest_name, guest_email, guest_phone, number_of_guests, total_price, created_at FROM bookings ORDER BY created_at DESC")
-    type rec struct{ ID string; UserEmail string; Status string; CheckIn time.Time; CheckOut time.Time; GuestName string; GuestEmail string; GuestPhone string; NumberOfGuests int; TotalPrice float64; CreatedAt time.Time }
+    rows, err := s.pool.Query(r.Context(), "SELECT id, COALESCE(user_email,'') AS user_email, COALESCE(status,'requested') AS status, check_in, check_out, COALESCE(guest_name,'') AS guest_name, COALESCE(guest_email,'') AS guest_email, COALESCE(guest_phone,'') AS guest_phone, number_of_guests, COALESCE(subtotal_price,0)::float8 AS subtotal_price, COALESCE(discount_amount,0)::float8 AS discount_amount, COALESCE(total_price,0)::float8 AS total_price, COALESCE(created_at, now()) AS created_at FROM bookings ORDER BY created_at DESC")
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    type rec struct{ ID string; UserEmail string; Status string; CheckIn time.Time; CheckOut time.Time; GuestName string; GuestEmail string; GuestPhone string; NumberOfGuests int; SubtotalPrice float64; DiscountAmount float64; TotalPrice float64; CreatedAt time.Time }
     var out []rec
-    for rows.Next() { var a rec; _ = rows.Scan(&a.ID,&a.UserEmail,&a.Status,&a.CheckIn,&a.CheckOut,&a.GuestName,&a.GuestEmail,&a.GuestPhone,&a.NumberOfGuests,&a.TotalPrice,&a.CreatedAt); out = append(out,a) }
+    for rows.Next() { var a rec; if err := rows.Scan(&a.ID,&a.UserEmail,&a.Status,&a.CheckIn,&a.CheckOut,&a.GuestName,&a.GuestEmail,&a.GuestPhone,&a.NumberOfGuests,&a.SubtotalPrice,&a.DiscountAmount,&a.TotalPrice,&a.CreatedAt); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return } ; out = append(out,a) }
+    if rows.Err() != nil { jsonResp(w, 500, map[string]string{"error": rows.Err().Error()}); return }
     jsonResp(w, 200, map[string]any{"data": out})
 }
 
 func (s *Server) handleListBookingsMine(w http.ResponseWriter, r *http.Request) {
     c := getClaims(r)
-    rows, _ := s.pool.Query(r.Context(), "SELECT id, status, check_in, check_out, guest_name, number_of_guests, total_price, created_at FROM bookings WHERE user_email=$1 ORDER BY created_at DESC", c["email"])
-    type rec struct{ ID string; Status string; CheckIn time.Time; CheckOut time.Time; GuestName string; NumberOfGuests int; TotalPrice float64; CreatedAt time.Time }
+    rows, err := s.pool.Query(r.Context(), "SELECT id, COALESCE(status,'requested') AS status, check_in, check_out, COALESCE(guest_name,'') AS guest_name, number_of_guests, COALESCE(subtotal_price,0)::float8 AS subtotal_price, COALESCE(discount_amount,0)::float8 AS discount_amount, COALESCE(total_price,0)::float8 AS total_price, COALESCE(created_at, now()) AS created_at FROM bookings WHERE user_email=$1 ORDER BY created_at DESC", c["email"])
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    type rec struct{ ID string; Status string; CheckIn time.Time; CheckOut time.Time; GuestName string; NumberOfGuests int; SubtotalPrice float64; DiscountAmount float64; TotalPrice float64; CreatedAt time.Time }
     var out []rec
-    for rows.Next() { var a rec; _ = rows.Scan(&a.ID,&a.Status,&a.CheckIn,&a.CheckOut,&a.GuestName,&a.NumberOfGuests,&a.TotalPrice,&a.CreatedAt); out = append(out,a) }
+    for rows.Next() { var a rec; if err := rows.Scan(&a.ID,&a.Status,&a.CheckIn,&a.CheckOut,&a.GuestName,&a.NumberOfGuests,&a.SubtotalPrice,&a.DiscountAmount,&a.TotalPrice,&a.CreatedAt); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return } ; out = append(out,a) }
+    if rows.Err() != nil { jsonResp(w, 500, map[string]string{"error": rows.Err().Error()}); return }
     jsonResp(w, 200, map[string]any{"data": out})
 }
 
 func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
     c := getClaims(r)
     var isOwner bool
-    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+    if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
     id := mux.Vars(r)["id"]
-    _, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET status='approved', updated_at=now() WHERE id=$1", id)
+    if _, err := s.pool.Exec(r.Context(), "UPDATE bookings SET status='approved', updated_at=now() WHERE id=$1", id); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     jsonResp(w, 200, map[string]string{"status":"approved"})
 }
 
 func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
     c := getClaims(r)
     var isOwner bool
-    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+    if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
     id := mux.Vars(r)["id"]
-    _, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET status='rejected', updated_at=now() WHERE id=$1", id)
+    if _, err := s.pool.Exec(r.Context(), "UPDATE bookings SET status='rejected', updated_at=now() WHERE id=$1", id); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     jsonResp(w, 200, map[string]string{"status":"rejected"})
 }
 
@@ -237,31 +255,35 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
     _ = json.NewDecoder(r.Body).Decode(&body)
     if body.BookingID == "" || body.Message == "" { jsonResp(w, 400, map[string]string{"error":"invalid_input"}); return }
     var isOwner bool
-    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
-    _, _ = s.pool.Exec(r.Context(), "INSERT INTO messages (booking_id, sender_email, is_from_owner, message) VALUES ($1,$2,$3,$4)", body.BookingID, c["email"], isOwner, body.Message)
+    if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    if _, err := s.pool.Exec(r.Context(), "INSERT INTO messages (booking_id, sender_email, is_from_owner, message) VALUES ($1,$2,$3,$4)", body.BookingID, c["email"], isOwner, body.Message); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    payload, _ := json.Marshal(map[string]any{"type":"message","data": map[string]any{"booking_id": body.BookingID, "sender_email": c["email"], "is_from_owner": isOwner, "message": body.Message, "created_at": time.Now().Format(time.RFC3339)}})
+    s.hub.Broadcast(body.BookingID, payload)
     jsonResp(w, 200, map[string]bool{"success": true})
 }
 
 func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
     bookingID := r.URL.Query().Get("booking_id")
-    rows, _ := s.pool.Query(r.Context(), "SELECT id, booking_id, sender_email, is_from_owner, message, created_at FROM messages WHERE booking_id=$1 ORDER BY created_at ASC", bookingID)
+    rows, err := s.pool.Query(r.Context(), "SELECT id, booking_id, sender_email, is_from_owner, message, created_at FROM messages WHERE booking_id=$1 ORDER BY created_at ASC", bookingID)
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     type rec struct{ ID int64; BookingID string; SenderEmail string; IsFromOwner bool; Message string; CreatedAt time.Time }
     var out []rec
-    for rows.Next() { var a rec; _ = rows.Scan(&a.ID,&a.BookingID,&a.SenderEmail,&a.IsFromOwner,&a.Message,&a.CreatedAt); out = append(out,a) }
+    for rows.Next() { var a rec; if err := rows.Scan(&a.ID,&a.BookingID,&a.SenderEmail,&a.IsFromOwner,&a.Message,&a.CreatedAt); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return } ; out = append(out,a) }
+    if rows.Err() != nil { jsonResp(w, 500, map[string]string{"error": rows.Err().Error()}); return }
     jsonResp(w, 200, map[string]any{"data": out})
 }
 
 func (s *Server) handleDashboardStats(w http.ResponseWriter, r *http.Request) {
     c := getClaims(r)
     var isOwner bool
-    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+    if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
     var totalBookings int64
     var confirmedBookings int64
     var totalRevenue float64
-    _ = s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings").Scan(&totalBookings)
-    _ = s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings WHERE status='approved'").Scan(&confirmedBookings)
-    _ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(SUM(total_price)::float8, 0) FROM bookings WHERE status='approved'").Scan(&totalRevenue)
+    if err := s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings").Scan(&totalBookings); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    if err := s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings WHERE status='approved'").Scan(&confirmedBookings); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(SUM(total_price)::float8, 0) FROM bookings WHERE status='approved'").Scan(&totalRevenue); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     jsonResp(w, 200, map[string]any{"total_bookings": totalBookings, "confirmed_bookings": confirmedBookings, "total_revenue": totalRevenue})
 }
 
@@ -311,19 +333,26 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TIMESTAMP DEFAULT now()
 );
 `)
+    _, _ = pool.Exec(ctx, `
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS subtotal_price NUMERIC;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_amount NUMERIC;
+`)
 }
 
 func main() {
     _ = godotenv.Load()
     dsn := os.Getenv("PG_DSN")
-    if dsn == "" { dsn = "postgres://postgres:72fv20ed@localhost:5432/mb-vacations?sslmode=disable" }
+    if dsn == "" { dsn = "postgres://postgres:postgres@localhost:5432/mb_vacation?sslmode=disable" }
     secret := os.Getenv("JWT_SECRET")
     if secret == "" { secret = "dev-secret" }
     cfg, _ := pgxpool.ParseConfig(dsn)
     pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
     if err != nil { panic(err) }
     ensureSchema(context.Background(), pool)
-    s := &Server{ pool: pool, jwtSecret: secret }
+    if _, err := pool.Exec(context.Background(), "SELECT 1"); err == nil {
+        log.Println("Conexão com o banco de dados estabelecida com sucesso")
+    }
+    s := &Server{ pool: pool, jwtSecret: secret, hub: NewHub() }
     r := mux.NewRouter()
     r.Use(func(h http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -357,6 +386,7 @@ func main() {
     r.HandleFunc("/bookings/{id}/approve", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
     r.HandleFunc("/bookings/{id}/reject", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
     r.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/ws/messages", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
     r.HandleFunc("/calendar/merged.ics", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
     r.HandleFunc("/stats/dashboard", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
     r.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -387,8 +417,11 @@ func main() {
     r.Handle("/bookings/{id}/reject", s.authMiddleware(http.HandlerFunc(s.handleReject))).Methods("POST")
     r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handlePostMessage))).Methods("POST")
     r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handleGetMessages))).Methods("GET")
+    r.HandleFunc("/ws/messages", s.handleWSMessages).Methods("GET")
     r.Handle("/stats/dashboard", s.authMiddleware(http.HandlerFunc(s.handleDashboardStats))).Methods("GET")
-    http.ListenAndServe(":3005", r)
+    port := os.Getenv("PORT")
+    if port == "" { port = "3005" }
+    http.ListenAndServe(":"+port, r)
 }
 
 func (s *Server) handleAddBlock(w http.ResponseWriter, r *http.Request) {
@@ -432,4 +465,44 @@ func (s *Server) handleUnblockRange(w http.ResponseWriter, r *http.Request) {
     // Delete any block overlapping the range
     _, _ = s.pool.Exec(r.Context(), "DELETE FROM blocks WHERE NOT (to_ts < $1 OR from_ts > $2)", from, to)
     jsonResp(w, 200, map[string]bool{"success": true})
+}
+type Hub struct {
+    rooms map[string]map[*websocket.Conn]struct{}
+}
+
+func NewHub() *Hub { return &Hub{ rooms: make(map[string]map[*websocket.Conn]struct{}) } }
+func (h *Hub) Add(room string, c *websocket.Conn) {
+    if _, ok := h.rooms[room]; !ok { h.rooms[room] = make(map[*websocket.Conn]struct{}) }
+    h.rooms[room][c] = struct{}{}
+}
+func (h *Hub) Remove(room string, c *websocket.Conn) {
+    if m, ok := h.rooms[room]; ok { delete(m, c); if len(m) == 0 { delete(h.rooms, room) } }
+}
+func (h *Hub) Broadcast(room string, payload []byte) {
+    if conns, ok := h.rooms[room]; ok {
+        for c := range conns {
+            _ = c.WriteMessage(websocket.TextMessage, payload)
+        }
+    }
+}
+
+func (s *Server) handleWSMessages(w http.ResponseWriter, r *http.Request) {
+    bookingID := r.URL.Query().Get("booking_id")
+    tokenStr := r.URL.Query().Get("token")
+    if bookingID == "" || tokenStr == "" { http.Error(w, "missing params", http.StatusBadRequest); return }
+    tkn, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) { return []byte(s.jwtSecret), nil })
+    if err != nil || !tkn.Valid { http.Error(w, "unauthorized", http.StatusUnauthorized); return }
+    upgrader := websocket.Upgrader{ CheckOrigin: func(r *http.Request) bool { return true } }
+    conn, err := upgrader.Upgrade(w, r, nil)
+    if err != nil { log.Println("ws upgrade error:", err); http.Error(w, "upgrade_failed", http.StatusInternalServerError); return }
+    s.hub.Add(bookingID, conn)
+    // Optional: send a hello message
+    _ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"hello"}`))
+    go func() {
+        defer func() { s.hub.Remove(bookingID, conn); conn.Close() }()
+        for {
+            // Read and discard client messages (we only push server events)
+            if _, _, err := conn.ReadMessage(); err != nil { break }
+        }
+    }()
 }

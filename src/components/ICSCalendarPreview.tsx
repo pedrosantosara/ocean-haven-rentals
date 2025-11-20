@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Card,
   CardContent,
@@ -93,11 +94,16 @@ export function ICSCalendarPreview() {
   const [availability, setAvailability] = React.useState<Record<string, boolean>>({});
   const [notes, setNotes] = React.useState<Record<string, string>>({});
   const [noteDraft, setNoteDraft] = React.useState('');
+  const [flashRange, setFlashRange] = React.useState(false);
+  const [bookings, setBookings] = React.useState<{ id: string; check_in: string; check_out: string; status?: string; guest_name?: string; guest_email?: string }[]>([]);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   React.useEffect(() => {
     const loadIcs = async () => {
       try {
-        const res = await fetch('http://localhost:3005/calendar/merged.ics');
+        const API = 'http://localhost:3005';
+        const res = await fetch(`${API}/calendar/merged.ics?t=${Date.now()}`);
         if (!res.ok) {
           return;
         }
@@ -113,6 +119,46 @@ export function ICSCalendarPreview() {
     };
     loadIcs();
   }, []);
+
+  React.useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const API = 'http://localhost:3005';
+    (async () => {
+      const res = await fetch(`${API}/bookings`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const j = await res.json();
+      const rows = (j.data || []) as unknown[];
+      const mapped = rows.map((raw) => {
+        const r = raw as Record<string, unknown>;
+        return {
+          id: String(r.ID ?? r.id ?? ''),
+          check_in: String(r.CheckIn ?? r.check_in ?? ''),
+          check_out: String(r.CheckOut ?? r.check_out ?? ''),
+          status: String(r.Status ?? r.status ?? ''),
+          guest_name: String(r.GuestName ?? r.guest_name ?? ''),
+          guest_email: String(r.GuestEmail ?? r.guest_email ?? ''),
+        };
+      });
+      setBookings(mapped);
+    })();
+  }, []);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const fromStr = params.get('from');
+    const toStr = params.get('to');
+    if (fromStr && toStr) {
+      const f = parse(fromStr, 'yyyy-MM-dd', new Date());
+      const t = parse(toStr, 'yyyy-MM-dd', new Date());
+      setSelected({ from: f, to: t });
+      setFlashRange(true);
+      window.setTimeout(() => setFlashRange(false), 1500);
+      const el = document.getElementById('calendar');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      void reloadCalendar();
+    }
+  }, [location.search]);
 
   React.useEffect(() => {
     const updateMonths = () => {
@@ -287,7 +333,7 @@ export function ICSCalendarPreview() {
   const API = 'http://localhost:3005';
   const reloadCalendar = async () => {
     try {
-      const res = await fetch(`${API}/calendar/merged.ics`);
+      const res = await fetch(`${API}/calendar/merged.ics?t=${Date.now()}`);
       if (!res.ok) return;
       const text = await res.text();
       const events = parseICS(text);
@@ -380,6 +426,10 @@ export function ICSCalendarPreview() {
                   'text-muted-foreground rounded-md w-10 sm:w-12 md:w-14 font-normal text-[0.8rem]',
                 cell: 'h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 text-center text-sm p-0 relative',
                 day: 'h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 p-0 font-normal',
+                day_range_start: `bg-primary/20 ring-2 ring-primary ${flashRange ? 'animate-glow' : ''} rounded-l-full`,
+                day_range_middle: `bg-primary/10 ${flashRange ? 'animate-glow' : ''}`,
+                day_range_end: `bg-primary/20 ring-2 ring-primary ${flashRange ? 'animate-glow' : ''} rounded-r-full`,
+                day_selected: `bg-primary/20 ring-2 ring-primary ${flashRange ? 'animate-glow' : ''} rounded-full`,
               }}
               components={{
                 DayContent: ({ date }) => {
@@ -389,7 +439,7 @@ export function ICSCalendarPreview() {
                   const items = icsEvents.filter((ev) => date >= ev.from && date <= ev.to);
                   return (
                     <div
-                      className='relative w-full h-full flex items-center justify-center'
+                      className='relative w-full h-full flex items-center justify-center cursor-pointer'
                       onMouseEnter={(e) => {
                         if (items.length === 0) return;
                         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -410,6 +460,17 @@ export function ICSCalendarPreview() {
                       }}
                       onMouseLeave={() => {
                         setHoverCard(null);
+                      }}
+                      onClick={() => {
+                        const match = bookings.find((b) => {
+                          if (!b.check_in || !b.check_out) return false;
+                          const ci = new Date(b.check_in);
+                          const co = new Date(b.check_out);
+                          return date >= ci && date <= co;
+                        });
+                        if (match && match.id) {
+                          navigate(`/chat/${match.id}`);
+                        }
                       }}
                     >
                       <span>{label}</span>
@@ -459,7 +520,7 @@ export function ICSCalendarPreview() {
           </div>
 
           <div className='w-full min-w-0'>
-            <Card className='bg-background/50 border-gradient-ocean rounded-2xl lg:sticky lg:top-24'>
+            <Card className='bg-background/50 glass-ocean rounded-2xl overflow-hidden lg:sticky lg:top-24'>
               <CardHeader>
                 <CardTitle>Gerenciar Período</CardTitle>
                 <CardDescription>

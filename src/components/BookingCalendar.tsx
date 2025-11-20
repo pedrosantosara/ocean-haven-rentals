@@ -9,7 +9,46 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { differenceInDays } from "date-fns";
 
-const PRICE_PER_NIGHT = 4500;
+const BASE_PRICE = 5000;
+const WEEKEND_PRICE = 6000;
+const WEEKEND_DAYS = new Set([5, 6]);
+
+function computePricing(checkIn?: Date, checkOut?: Date) {
+  if (!checkIn || !checkOut) {
+    return {
+      nights: 0,
+      weekdayNights: 0,
+      weekendNights: 0,
+      subtotal: 0,
+      discountPercent: 0,
+      discountAmount: 0,
+      total: 0,
+    };
+  }
+  const nights = differenceInDays(checkOut, checkIn);
+  let weekendNights = 0;
+  let weekdayNights = 0;
+  let subtotal = 0;
+  for (let i = 0; i < nights; i++) {
+    const d = new Date(checkIn);
+    d.setDate(d.getDate() + i);
+    const dow = d.getDay();
+    const isWeekend = WEEKEND_DAYS.has(dow);
+    if (isWeekend) {
+      weekendNights++;
+      subtotal += WEEKEND_PRICE;
+    } else {
+      weekdayNights++;
+      subtotal += BASE_PRICE;
+    }
+  }
+  const discountPercent = nights >= 28 ? 0.05 : nights >= 7 ? 0.03 : 0;
+  const discountAmount = subtotal * discountPercent;
+  const total = Math.round(subtotal - discountAmount);
+  return { nights, weekdayNights, weekendNights, subtotal, discountPercent, discountAmount, total };
+}
+
+const formatBRL = (n: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 
 export const BookingCalendar = () => {
   const navigate = useNavigate();
@@ -21,8 +60,7 @@ export const BookingCalendar = () => {
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [loading, setLoading] = useState(false);
 
-  const totalNights = checkIn && checkOut ? differenceInDays(checkOut, checkIn) : 0;
-  const totalPrice = totalNights * PRICE_PER_NIGHT;
+  const pricing = computePricing(checkIn, checkOut);
 
   type CreatedBooking = {
     id: string;
@@ -30,6 +68,8 @@ export const BookingCalendar = () => {
     check_in: string;
     check_out: string;
     number_of_guests: number;
+    subtotal_price: number;
+    discount_amount: number;
     total_price: number;
   };
 
@@ -66,7 +106,9 @@ export const BookingCalendar = () => {
           GuestEmail: guestEmail,
           GuestPhone: guestPhone,
           NumberOfGuests: numberOfGuests,
-          TotalPrice: totalPrice,
+          SubtotalPrice: pricing.subtotal,
+          DiscountAmount: pricing.discountAmount,
+          TotalPrice: pricing.total,
         }),
       });
       if (res.ok) {
@@ -76,7 +118,9 @@ export const BookingCalendar = () => {
           check_in: checkIn.toISOString().split("T")[0],
           check_out: checkOut.toISOString().split("T")[0],
           number_of_guests: numberOfGuests,
-          total_price: totalPrice,
+          subtotal_price: pricing.subtotal,
+          discount_amount: pricing.discountAmount,
+          total_price: pricing.total,
         };
       }
 
@@ -86,7 +130,9 @@ export const BookingCalendar = () => {
         check_in: checkIn.toISOString().split("T")[0],
         check_out: checkOut.toISOString().split("T")[0],
         number_of_guests: numberOfGuests,
-        total_price: totalPrice,
+        subtotal_price: pricing.subtotal,
+        discount_amount: pricing.discountAmount,
+        total_price: pricing.total,
       };
 
       navigate("/my-booking", { state: { booking: bookingForView } });
@@ -185,19 +231,33 @@ export const BookingCalendar = () => {
                 />
               </div>
 
-              {totalNights > 0 && (
+              {pricing.nights > 0 && (
                 <div className="p-4 bg-primary/10 rounded-lg space-y-2">
-                  <div className="flex justify-between">
+                  <div className="flex justify-between text-sm text-muted-foreground">
                     <span>Noites:</span>
-                    <span className="font-bold">{totalNights}</span>
+                    <span className="font-medium">{pricing.nights}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Preço por noite:</span>
-                    <span className="font-bold">R$ {PRICE_PER_NIGHT}</span>
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>Noites de semana:</span>
+                    <span className="font-medium">{pricing.weekdayNights} × {formatBRL(BASE_PRICE)}</span>
                   </div>
-                  <div className="flex justify-between text-lg border-t border-primary/20 pt-2">
-                    <span>Total:</span>
-                    <span className="font-bold text-primary">R$ {totalPrice}</span>
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>Finais de semana:</span>
+                    <span className="font-medium">{pricing.weekendNights} × {formatBRL(WEEKEND_PRICE)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>Subtotal:</span>
+                    <span className="font-medium">{formatBRL(pricing.subtotal)}</span>
+                  </div>
+                  {pricing.discountPercent > 0 && (
+                    <div className="flex justify-between text-sm text-green-600">
+                      <span>{pricing.nights >= 28 ? "Desconto mensal (5%)" : "Desconto semanal (3%)"}</span>
+                      <span className="font-medium">- {formatBRL(pricing.discountAmount)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-baseline border-t border-primary/20 pt-3">
+                    <span className="text-base md:text-lg font-semibold">Total:</span>
+                    <span className="text-2xl md:text-3xl font-extrabold text-gradient">{formatBRL(pricing.total)}</span>
                   </div>
                 </div>
               )}
