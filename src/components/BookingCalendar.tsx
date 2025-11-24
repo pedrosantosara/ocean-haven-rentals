@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { format as formatDate } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,8 +10,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { differenceInDays } from "date-fns";
 
-const BASE_PRICE = 5000;
-const WEEKEND_PRICE = 6000;
+let BASE_PRICE = 5000;
+let WEEKEND_PRICE = 6000;
 const WEEKEND_DAYS = new Set([5, 6]);
 
 function computePricing(checkIn?: Date, checkOut?: Date) {
@@ -59,8 +60,77 @@ export const BookingCalendar = () => {
   const [guestPhone, setGuestPhone] = useState("");
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [busyDays, setBusyDays] = useState<Record<string, boolean>>({});
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   const pricing = computePricing(checkIn, checkOut);
+
+  type IcsEvent = { from: Date; to: Date };
+  const parseICS = (icsText: string): IcsEvent[] => {
+    const lines = icsText.split(/\r?\n/);
+    const events: IcsEvent[] = [];
+    let dtstart: Date | undefined;
+    let dtend: Date | undefined;
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (line.startsWith('BEGIN:VEVENT')) { dtstart = undefined; dtend = undefined; continue; }
+      if (line.startsWith('DTSTART')) { const [, val] = line.split(':'); dtstart = new Date(val.length === 8 ? `${val.slice(0,4)}-${val.slice(4,6)}-${val.slice(6,8)}` : val); continue; }
+      if (line.startsWith('DTEND')) { const [, val] = line.split(':'); dtend = new Date(val.length === 8 ? `${val.slice(0,4)}-${val.slice(4,6)}-${val.slice(6,8)}` : val); continue; }
+      if (line.startsWith('END:VEVENT')) { if (dtstart && dtend) { const inclusiveEnd = new Date(dtend); inclusiveEnd.setDate(inclusiveEnd.getDate() - 1); events.push({ from: dtstart, to: inclusiveEnd }); } dtstart = undefined; dtend = undefined; continue; }
+    }
+    return events;
+  };
+
+  const loadBusyDays = async () => {
+    try {
+      const API = "http://localhost:3005";
+      const res = await fetch(`${API}/calendar/merged.ics?t=${Date.now()}`);
+      if (!res.ok) return;
+      const text = await res.text();
+      const events = parseICS(text);
+      const map: Record<string, boolean> = {};
+      for (const ev of events) {
+        const days: Date[] = [];
+        const start = new Date(ev.from);
+        const end = new Date(ev.to);
+        const cur = new Date(start);
+        while (cur <= end) { days.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
+        for (const d of days) { map[formatDate(d, 'yyyy-MM-dd')] = true; }
+      }
+      setBusyDays(map);
+    } catch (_) { return; }
+  };
+
+  useEffect(() => {
+    loadBusyDays();
+    const handler = () => { void loadBusyDays(); };
+    document.addEventListener('ical:updated', handler as EventListener);
+    const id = window.setInterval(() => { void loadBusyDays(); }, 10 * 60 * 1000);
+    return () => { document.removeEventListener('ical:updated', handler as EventListener); window.clearInterval(id); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const API = "http://localhost:3005";
+        const r = await fetch(`${API}/settings/public`);
+        if (!r.ok) return;
+        const j = await r.json();
+        const s = j.settings || {};
+        BASE_PRICE = Number(s.base_price || BASE_PRICE);
+        WEEKEND_PRICE = Number(s.weekend_price || WEEKEND_PRICE);
+        setSettingsLoaded(true);
+      } catch (_) { return; }
+    })();
+  }, []);
+
+  const disabledMatcher = useMemo(() => {
+    return (date: Date) => {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const key = formatDate(date, 'yyyy-MM-dd');
+      return date < today || !!busyDays[key];
+    };
+  }, [busyDays]);
 
   type CreatedBooking = {
     id: string;
@@ -166,7 +236,7 @@ export const BookingCalendar = () => {
                   setCheckIn(range?.from);
                   setCheckOut(range?.to);
                 }}
-                disabled={(date) => date < new Date()}
+                disabled={disabledMatcher}
                 showOutsideDays
                 numberOfMonths={2}
                 className="w-full"

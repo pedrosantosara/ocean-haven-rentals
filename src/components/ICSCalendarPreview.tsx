@@ -12,9 +12,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { parse, eachDayOfInterval, format, addDays } from 'date-fns';
+import { parse, eachDayOfInterval, format, addDays, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import type { DateRange, SelectRangeEventHandler } from 'react-day-picker';
+import { Calendar as CalendarIcon, Lock, Unlock, Info, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 type IcsEvent = { from: Date; to: Date; source?: string; summary?: string; status?: string };
 
@@ -25,16 +27,17 @@ function parseICS(icsText: string): IcsEvent[] {
 
   const parseIcsDate = (value: string): Date => {
     if (/^\d{8}$/.test(value)) {
-      return parse(value, 'yyyyMMdd', new Date());
+      const year = Number(value.slice(0, 4));
+      const month = Number(value.slice(4, 6)) - 1;
+      const day = Number(value.slice(6, 8));
+      return new Date(year, month, day);
     }
     if (/^\d{8}T\d{6}Z$/.test(value)) {
       const year = Number(value.slice(0, 4));
       const month = Number(value.slice(4, 6)) - 1;
       const day = Number(value.slice(6, 8));
-      const hour = Number(value.slice(9, 11));
-      const minute = Number(value.slice(11, 13));
-      const second = Number(value.slice(13, 15));
-      return new Date(Date.UTC(year, month, day, hour, minute, second));
+      // Ignore time, force to local midnight to match calendar days
+      return new Date(year, month, day);
     }
     return new Date(value);
   };
@@ -88,6 +91,7 @@ export function ICSCalendarPreview() {
   const [icsEvents, setIcsEvents] = React.useState<IcsEvent[]>([]);
   const [hoverCard, setHoverCard] = React.useState<{ x: number; y: number; items: IcsEvent[] } | null>(null);
   const calRef = React.useRef<HTMLDivElement | null>(null);
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [months, setMonths] = React.useState(1);
   const [selected, setSelected] = React.useState<DateRange | undefined>();
@@ -96,6 +100,7 @@ export function ICSCalendarPreview() {
   const [noteDraft, setNoteDraft] = React.useState('');
   const [flashRange, setFlashRange] = React.useState(false);
   const [bookings, setBookings] = React.useState<{ id: string; check_in: string; check_out: string; status?: string; guest_name?: string; guest_email?: string }[]>([]);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -118,6 +123,10 @@ export function ICSCalendarPreview() {
       }
     };
     loadIcs();
+    const handler = () => { void reloadCalendar(); };
+    document.addEventListener('ical:updated', handler as EventListener);
+    const id = window.setInterval(() => { void reloadCalendar(); }, 10 * 60 * 1000);
+    return () => { document.removeEventListener('ical:updated', handler as EventListener); window.clearInterval(id); };
   }, []);
 
   React.useEffect(() => {
@@ -176,23 +185,23 @@ export function ICSCalendarPreview() {
 
   React.useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (!calRef.current) return;
       const target = e.target as Node | null;
-      if (target && !calRef.current.contains(target)) {
+      if (!containerRef.current) return;
+      if (target && !containerRef.current.contains(target)) {
         setSelected(undefined);
       }
     };
     const handlerClick = (e: MouseEvent) => {
-      if (!calRef.current) return;
       const target = e.target as Node | null;
-      if (target && !calRef.current.contains(target)) {
+      if (!containerRef.current) return;
+      if (target && !containerRef.current.contains(target)) {
         setSelected(undefined);
       }
     };
     const handlerTouch = (e: TouchEvent) => {
-      if (!calRef.current) return;
       const target = e.target as Node | null;
-      if (target && !calRef.current.contains(target)) {
+      if (!containerRef.current) return;
+      if (target && !containerRef.current.contains(target)) {
         setSelected(undefined);
       }
     };
@@ -345,55 +354,94 @@ export function ICSCalendarPreview() {
 
   const blockRangeBackend = async (from: Date, to: Date, note?: string) => {
     const token = localStorage.getItem('token');
-    if (!token) return;
-    const res = await fetch(`${API}/blocks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ From: from.toISOString(), To: addDays(to, 1).toISOString(), Note: note || '' }),
-    });
-    if (!res.ok) {
-      if (res.status === 403) { toast.error('Você precisa ser proprietário para bloquear'); } else { toast.error('Erro ao bloquear período'); }
+    if (!token) {
+      toast.error('Sessão expirada. Faça login novamente.');
       return;
     }
-    toast.success('Período bloqueado');
-    await reloadCalendar();
+    setIsSubmitting(true);
+    try {
+      console.log('Sending block request:', { from: from.toISOString(), to: addDays(to, 1).toISOString(), note });
+      const res = await fetch(`${API}/blocks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ From: from.toISOString(), To: addDays(to, 1).toISOString(), Note: note || '' }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error('Block error response:', res.status, err);
+        if (res.status === 403) { toast.error('Apenas proprietários podem bloquear datas.'); }
+        else { toast.error('Erro ao bloquear período. Tente novamente.'); }
+        return;
+      }
+      toast.success('Período bloqueado com sucesso!');
+      await reloadCalendar();
+      setSelected(undefined);
+      setNoteDraft('');
+    } catch (e) {
+      console.error('Block network error:', e);
+      toast.error('Erro de conexão. Verifique se o servidor está rodando.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const unblockRangeBackend = async (from: Date, to: Date) => {
     const token = localStorage.getItem('token');
-    if (!token) return;
-    const res = await fetch(`${API}/blocks/unblock`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ From: from.toISOString(), To: addDays(to, 1).toISOString() }),
-    });
-    if (!res.ok) {
-      if (res.status === 403) { toast.error('Você precisa ser proprietário para desbloquear'); } else { toast.error('Erro ao desbloquear período'); }
+    if (!token) {
+      toast.error('Sessão expirada. Faça login novamente.');
       return;
     }
-    toast.success('Período desbloqueado');
-    await reloadCalendar();
+    setIsSubmitting(true);
+    try {
+      console.log('Sending unblock request:', { from: from.toISOString(), to: addDays(to, 1).toISOString() });
+      const res = await fetch(`${API}/blocks/unblock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ From: from.toISOString(), To: addDays(to, 1).toISOString() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error('Unblock error response:', res.status, err);
+        if (res.status === 403) { toast.error('Apenas proprietários podem desbloquear datas.'); }
+        else { toast.error('Erro ao desbloquear período.'); }
+        return;
+      }
+      toast.success('Período desbloqueado com sucesso!');
+      await reloadCalendar();
+      setSelected(undefined);
+    } catch (e) {
+      console.error('Unblock network error:', e);
+      toast.error('Erro de conexão ao desbloquear.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <Card className='glass-ocean border-primary/20 mb-8'>
-      <CardHeader>
-        <CardTitle>Calendário</CardTitle>
-        <CardDescription>Gerencie disponibilidade e bloqueios</CardDescription>
+    <Card className='border-border/50 shadow-sm bg-white mb-8'>
+      <CardHeader className="pb-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-xl">Calendário de Reservas</CardTitle>
+            <CardDescription>Visualize ocupação e gerencie bloqueios</CardDescription>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded-md border border-border/50">
+              <div className="w-2.5 h-2.5 rounded-full bg-rose-100 border border-rose-200"></div>
+              <span>Ocupado</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 px-2 py-1 rounded-md border border-border/50">
+              <div className="w-2.5 h-2.5 rounded-full bg-primary/20 border border-primary/30"></div>
+              <span>Selecionado</span>
+            </div>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className='flex items-center gap-2 mb-4'>
-          <Badge>Ocupado</Badge>
-          {disabledRanges.length > 0 && (
-            <p className='text-sm text-muted-foreground'>
-              {disabledRanges.length} intervalo(s) bloqueado(s)
-            </p>
-          )}
-        </div>
-        <div className='grid grid-cols-1 lg:grid-cols-[70%_30%] gap-4'>
+        <div ref={containerRef} className='grid grid-cols-1 lg:grid-cols-[70%_30%] gap-6'>
           <div ref={calRef} className='relative w-full min-w-0 overflow-visible'>
             <Calendar
-              className='w-full'
+              className='w-full border rounded-xl p-4 shadow-sm'
               showOutsideDays
               numberOfMonths={months}
               mode='range'
@@ -408,28 +456,24 @@ export function ICSCalendarPreview() {
                 busy: busySets.all,
               }}
               modifiersClassNames={{
-                unavailable: '',
+                unavailable: 'text-muted-foreground opacity-30',
                 noted: 'ring-2 ring-accent',
-                busy: '',
-                busyMiddle:
-                  'relative before:absolute before:left-1 before:right-1 before:top-1/2 before:h-[2px] before:bg-destructive before:opacity-100 before:pointer-events-none',
-                busyStart:
-                  'relative before:absolute before:left-1/2 before:right-1 before:top-1/2 before:h-[2px] before:bg-destructive before:opacity-100 before:pointer-events-none',
-                busyEnd:
-                  'relative before:absolute before:left-1 before:right-1/2 before:top-1/2 before:h-[2px] before:bg-destructive before:opacity-100 before:pointer-events-none',
+                busy: 'bg-rose-100 text-rose-700 font-medium',
+                busyMiddle: 'bg-rose-100 text-rose-700 font-medium rounded-none mx-0 w-full',
+                busyStart: 'bg-rose-100 text-rose-700 font-medium rounded-l-full rounded-r-none pl-1',
+                busyEnd: 'bg-rose-100 text-rose-700 font-medium rounded-r-full rounded-l-none pr-1',
               }}
               classNames={{
-                months: 'grid grid-cols-1 md:grid-cols-2 gap-4',
+                months: 'grid grid-cols-1 md:grid-cols-2 gap-8',
                 month: 'space-y-4',
-                caption_label: 'text-base md:text-lg font-semibold',
-                head_cell:
-                  'text-muted-foreground rounded-md w-10 sm:w-12 md:w-14 font-normal text-[0.8rem]',
-                cell: 'h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 text-center text-sm p-0 relative',
-                day: 'h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 p-0 font-normal',
-                day_range_start: `bg-primary/20 ring-2 ring-primary ${flashRange ? 'animate-glow' : ''} rounded-l-full`,
-                day_range_middle: `bg-primary/10 ${flashRange ? 'animate-glow' : ''}`,
-                day_range_end: `bg-primary/20 ring-2 ring-primary ${flashRange ? 'animate-glow' : ''} rounded-r-full`,
-                day_selected: `bg-primary/20 ring-2 ring-primary ${flashRange ? 'animate-glow' : ''} rounded-full`,
+                caption_label: 'text-base md:text-lg font-semibold text-foreground pl-2',
+                head_cell: 'text-muted-foreground rounded-md w-10 sm:w-12 md:w-14 font-normal text-[0.8rem]',
+                cell: 'h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 text-center text-sm p-0 relative focus-within:relative focus-within:z-20',
+                day: 'h-10 w-10 sm:h-12 sm:w-12 md:h-14 md:w-14 p-0 font-normal aria-selected:opacity-100 rounded-full transition-colors hover:bg-muted',
+                day_range_start: `bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-l-full rounded-r-none ${flashRange ? 'animate-glow' : ''}`,
+                day_range_middle: `bg-primary/10 text-primary hover:bg-primary/20 rounded-none ${flashRange ? 'animate-glow' : ''}`,
+                day_range_end: `bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-r-full rounded-l-none ${flashRange ? 'animate-glow' : ''}`,
+                day_selected: `bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-full ${flashRange ? 'animate-glow' : ''}`,
               }}
               components={{
                 DayContent: ({ date }) => {
@@ -498,20 +542,21 @@ export function ICSCalendarPreview() {
             {hoverCard && (
               <div
                 style={{ position: 'absolute', left: hoverCard.x, top: hoverCard.y, transform: 'translate(-50%, -100%)' }}
-                className='z-50 rounded-md border border-border bg-white p-2 text-xs shadow-xl'
+                className='z-50 rounded-md border border-border bg-white p-3 text-xs shadow-xl min-w-[240px]'
                 onMouseLeave={() => setHoverCard(null)}
               >
-                <div className='grid gap-2 min-w-[220px]'>
+                <div className='grid gap-2'>
                   {hoverCard.items.slice(0, 4).map((ev, idx) => (
-                    <div key={idx} className='rounded-md border border-border bg-white p-2 shadow'>
-                      <div className='flex items-center justify-between'>
-                        <span className='font-medium'>{ev.summary || ((ev.source || '').toLowerCase().includes('site') ? 'Reserva' : 'Evento')}</span>
-                        <Badge variant='secondary'>{normalizeSource(ev) || '—'}</Badge>
+                    <div key={idx} className='rounded-md border border-border/50 bg-muted/20 p-2.5'>
+                      <div className='flex items-center justify-between mb-1.5'>
+                        <span className='font-semibold text-foreground'>{ev.summary || ((ev.source || '').toLowerCase().includes('site') ? 'Reserva' : 'Evento')}</span>
+                        <Badge variant='outline' className="text-[10px] h-5 px-1.5">{normalizeSource(ev) || '—'}</Badge>
                       </div>
-                      <div className='mt-1 text-muted-foreground'>
-                        {format(ev.from, 'dd/MM/yyyy')} — {format(ev.to, 'dd/MM/yyyy')}
+                      <div className='flex items-center text-muted-foreground text-[11px] gap-1'>
+                        <CalendarIcon className="w-3 h-3" />
+                        {format(ev.from, 'dd/MM')} — {format(ev.to, 'dd/MM/yyyy')}
                       </div>
-                      {ev.status && <div className='mt-1'>Status: {ev.status}</div>}
+                      {ev.status && <div className='mt-1 text-[10px] uppercase tracking-wider text-muted-foreground/80 font-medium'>{ev.status}</div>}
                     </div>
                   ))}
                 </div>
@@ -520,84 +565,83 @@ export function ICSCalendarPreview() {
           </div>
 
           <div className='w-full min-w-0'>
-            <Card className='bg-background/50 glass-ocean rounded-2xl overflow-hidden lg:sticky lg:top-24'>
-              <CardHeader>
-                <CardTitle>Gerenciar Período</CardTitle>
-                <CardDescription>
-                  Selecione um intervalo e aplique as regras
-                </CardDescription>
+            <Card className='border-border/50 shadow-sm bg-white rounded-xl lg:sticky lg:top-24'>
+              <CardHeader className="pb-3 border-b border-border/40 bg-muted/10">
+                <CardTitle className="text-base font-medium flex items-center gap-2">
+                  <CalendarIcon className="w-4 h-4 text-primary" />
+                  Gerenciar Disponibilidade
+                </CardTitle>
               </CardHeader>
-              <CardContent className='space-y-3 text-sm'>
-                <div className='flex items-center justify-between'>
-                  <span className='text-sm'>Disponível</span>
-                  <Switch
-                    className='scale-90'
-                    checked={(() => {
-                      if (!selected?.from || !selected?.to) return true;
-                      const days = eachDayOfInterval({ start: selected.from, end: selected.to });
-                      const blocked = days.some((day) => icsEvents.some((ev) => (ev.source || '').toLowerCase().includes('block') && day >= ev.from && day <= ev.to));
-                      return !blocked;
-                    })()}
-                    onCheckedChange={async (checked) => {
-                      if (!selected?.from || !selected?.to) return;
-                      if (!checked) {
-                        await blockRangeBackend(selected.from, selected.to, noteDraft.trim() || undefined);
-                      } else {
-                        const useAdj = !selectionHasBlock && selectionTouchesBlock;
-                        const f = useAdj ? addDays(selected.from, -1) : selected.from;
-                        const t = useAdj ? addDays(selected.to, 1) : selected.to;
-                        await unblockRangeBackend(f, t);
-                      }
-                    }}
-                  />
-                </div>
+              <CardContent className='pt-4 space-y-4'>
+                {!selected?.from || !selected?.to ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground text-sm text-center border-2 border-dashed border-border/60 rounded-lg bg-muted/5">
+                    <Info className="w-8 h-8 mb-2 opacity-30" />
+                    <p>Selecione um período no calendário<br />para bloquear ou liberar datas</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="bg-primary/5 rounded-lg p-3 border border-primary/10">
+                      <div className="text-xs font-medium text-primary mb-1 uppercase tracking-wider">Período Selecionado</div>
+                      <div className="text-sm font-semibold text-foreground flex items-center gap-2">
+                        {format(selected.from, 'dd/MM/yyyy')}
+                        <span className="text-muted-foreground">→</span>
+                        {format(selected.to, 'dd/MM/yyyy')}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {differenceInDays(selected.to, selected.from) + 1} dias selecionados
+                      </div>
+                    </div>
 
-                <Button
-                  variant='gradient'
-                  size='sm'
-                  className='shadow-ocean'
-                  onClick={async () => { if (!selected?.from || !selected?.to) return; await blockRangeBackend(selected.from, selected.to, noteDraft.trim() || undefined); }}
-                  disabled={!selected?.from || !selected?.to}
-                >
-                  Bloquear período selecionado
-                </Button>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Button
+                        variant={selectionHasBlock ? "secondary" : "destructive"}
+                        className={cn("w-full shadow-sm", selectionHasBlock && "opacity-50 cursor-not-allowed")}
+                        onClick={async () => { if (!selected?.from || !selected?.to) return; await blockRangeBackend(selected.from, selected.to, noteDraft.trim() || undefined); }}
+                        disabled={!selected?.from || !selected?.to || selectionHasBlock || isSubmitting}
+                      >
+                        {isSubmitting ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Lock className="w-3.5 h-3.5 mr-2" />}
+                        {isSubmitting ? 'Processando...' : 'Bloquear'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className={cn("w-full shadow-sm hover:bg-green-50 hover:text-green-700 hover:border-green-200", (!selectionHasBlock && !selectionTouchesBlock) && "opacity-50 cursor-not-allowed")}
+                        onClick={async () => {
+                          if (!selected?.from || !selected?.to) return;
+                          const useAdj = !selectionHasBlock && selectionTouchesBlock;
+                          const f = useAdj ? addDays(selected.from, -1) : selected.from;
+                          const t = useAdj ? addDays(selected.to, 1) : selected.to;
+                          await unblockRangeBackend(f, t);
+                        }}
+                        disabled={!selected?.from || !selected?.to || (!selectionHasBlock && !selectionTouchesBlock) || isSubmitting}
+                      >
+                        {isSubmitting ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Unlock className="w-3.5 h-3.5 mr-2" />}
+                        {isSubmitting ? 'Processando...' : 'Liberar'}
+                      </Button>
+                    </div>
 
-                <Button
-                  variant='outline'
-                  size='sm'
-                  className='shadow-ocean'
-                  onClick={async () => {
-                    if (!selected?.from || !selected?.to) return;
-                    const useAdj = !selectionHasBlock && selectionTouchesBlock;
-                    const f = useAdj ? addDays(selected.from, -1) : selected.from;
-                    const t = useAdj ? addDays(selected.to, 1) : selected.to;
-                    await unblockRangeBackend(f, t);
-                  }}
-                  disabled={!selected?.from || !selected?.to || (!selectionHasBlock && !selectionTouchesBlock)}
-                >
-                  Desbloquear período selecionado
-                </Button>
-
-                <div className='space-y-2'>
-                  <span className='text-sm'>Notas</span>
-                  <Textarea
-                    value={noteDraft}
-                    onChange={(e) => setNoteDraft(e.target.value)}
-                    placeholder='Adicione uma nota para as datas selecionadas'
-                    rows={2}
-                  />
-                  <Button
-                    size='sm'
-                    variant='gradient'
-                    className='shadow-ocean'
-                    onClick={saveNotesForSelection}
-                    disabled={
-                      !selected?.from || !selected?.to || !noteDraft.trim()
-                    }
-                  >
-                    Salvar notas para o período
-                  </Button>
-                </div>
+                    <div className="space-y-2 pt-4 border-t border-border/50">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                        Observações Internas
+                      </label>
+                      <Textarea
+                        value={noteDraft}
+                        onChange={(e) => setNoteDraft(e.target.value)}
+                        placeholder="Ex: Manutenção, Reserva Externa..."
+                        className="resize-none text-sm min-h-[80px] bg-background"
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="w-full text-muted-foreground hover:text-primary justify-start h-8 px-2"
+                        onClick={saveNotesForSelection}
+                        disabled={!noteDraft.trim()}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-2" />
+                        Salvar Nota
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

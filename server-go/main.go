@@ -7,10 +7,12 @@ import (
     "io"
     "log"
     "net/http"
+    "net/url"
     "os"
     "regexp"
     "strings"
     "time"
+    "fmt"
     "github.com/golang-jwt/jwt/v5"
     "github.com/gorilla/mux"
     "github.com/gorilla/websocket"
@@ -24,6 +26,10 @@ type Server struct {
     pool *pgxpool.Pool
     jwtSecret string
     hub *Hub
+    icsCache string
+    icsLastUpdated time.Time
+    stripeSecret string
+    stripePublic string
 }
 
 func jsonResp(w http.ResponseWriter, code int, v any) {
@@ -104,11 +110,11 @@ func (s *Server) handleAddIcal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListIcal(w http.ResponseWriter, r *http.Request) {
-    rows, err := s.pool.Query(r.Context(), "SELECT id, platform, url, COALESCE(created_at, now()) AS created_at FROM icals ORDER BY created_at DESC")
+    rows, err := s.pool.Query(r.Context(), "SELECT id, platform, url, COALESCE(created_at, now()) AS created_at, last_sync FROM icals ORDER BY created_at DESC")
     if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
-    type rec struct{ ID int64 `json:"id"`; Platform string `json:"platform"`; Url string `json:"url"`; CreatedAt time.Time `json:"created_at"` }
+    type rec struct{ ID int64 `json:"id"`; Platform string `json:"platform"`; Url string `json:"url"`; CreatedAt time.Time `json:"created_at"`; LastSync *time.Time `json:"last_sync,omitempty"` }
     var out []rec
-    for rows.Next() { var a rec; if err := rows.Scan(&a.ID,&a.Platform,&a.Url,&a.CreatedAt); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return } ; out = append(out,a) }
+    for rows.Next() { var a rec; if err := rows.Scan(&a.ID,&a.Platform,&a.Url,&a.CreatedAt,&a.LastSync); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return } ; out = append(out,a) }
     if rows.Err() != nil { jsonResp(w, 500, map[string]string{"error": rows.Err().Error()}); return }
     jsonResp(w, 200, map[string]any{"data": out})
 }
@@ -120,12 +126,36 @@ func (s *Server) handleDeleteIcal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMergedICS(w http.ResponseWriter, r *http.Request) {
+    if s.icsCache == "" || time.Since(s.icsLastUpdated) > 10*time.Minute {
+        s.refreshMergedICS(r.Context())
+    }
+    w.Header().Set("Content-Type", "text/calendar")
+    w.Header().Set("X-ICS-Last-Updated", s.icsLastUpdated.Format(time.RFC3339))
+    _, _ = w.Write([]byte(s.icsCache))
+}
+
+func extractEventsFromICS(s string) []string {
+    re := regexp.MustCompile(`(?s)BEGIN:VEVENT.*?END:VEVENT\s*`)
+    return re.FindAllString(s, -1)
+}
+
+func extractEventsFromICSWithCategory(s, category string) []string {
+    re := regexp.MustCompile(`(?s)BEGIN:VEVENT.*?END:VEVENT\s*`)
+    events := re.FindAllString(s, -1)
+    var out []string
+    for _, e := range events {
+        out = append(out, strings.Replace(e, "BEGIN:VEVENT\n", "BEGIN:VEVENT\nCATEGORIES:"+category+"\n", 1))
+    }
+    return out
+}
+
+func (s *Server) refreshMergedICS(ctx context.Context) {
     var vevents []string
-    rows, err := s.pool.Query(r.Context(), "SELECT platform, url FROM icals")
-    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    rows, err := s.pool.Query(ctx, "SELECT id, platform, url FROM icals")
+    if err != nil { return }
     for rows.Next() {
-        var platform, u string
-        if err := rows.Scan(&platform, &u); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+        var rid int64; var platform, u string
+        if err := rows.Scan(&rid, &platform, &u); err != nil { return }
         resp, err := http.Get(u)
         if err != nil { continue }
         body, err := io.ReadAll(resp.Body)
@@ -133,13 +163,13 @@ func (s *Server) handleMergedICS(w http.ResponseWriter, r *http.Request) {
         if err != nil { continue }
         evs := extractEventsFromICSWithCategory(string(body), platform)
         vevents = append(vevents, evs...)
+        _, _ = s.pool.Exec(ctx, "UPDATE icals SET last_sync=now() WHERE id=$1", rid)
     }
-    // Include manual blocks
-    bl, err := s.pool.Query(r.Context(), "SELECT id, from_ts, to_ts, COALESCE(note,'') AS note FROM blocks")
-    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    bl, err := s.pool.Query(ctx, "SELECT id, from_ts, to_ts, COALESCE(note,'') AS note FROM blocks")
+    if err != nil { return }
     for bl.Next() {
         var id int64; var from, to time.Time; var note string
-        if err := bl.Scan(&id, &from, &to, &note); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+        if err := bl.Scan(&id, &from, &to, &note); err != nil { return }
         var sb strings.Builder
         sb.WriteString("BEGIN:VEVENT\n")
         sb.WriteString("UID:block-" + time.UnixMilli(time.Now().UnixMilli()).Format("20060102150405") + "-" + time.Now().Format("150405") + "\n")
@@ -151,11 +181,11 @@ func (s *Server) handleMergedICS(w http.ResponseWriter, r *http.Request) {
         sb.WriteString("END:VEVENT\n")
         vevents = append(vevents, sb.String())
     }
-    bro, err := s.pool.Query(r.Context(), "SELECT id, COALESCE(guest_name,'') AS guest_name, check_in, check_out, COALESCE(status,'requested') AS status FROM bookings")
-    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    bro, err := s.pool.Query(ctx, "SELECT id, COALESCE(guest_name,'') AS guest_name, check_in, check_out, COALESCE(status,'requested') AS status FROM bookings")
+    if err != nil { return }
     for bro.Next() {
         var id, guest, status string; var ci, co time.Time
-        if err := bro.Scan(&id,&guest,&ci,&co,&status); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+        if err := bro.Scan(&id,&guest,&ci,&co,&status); err != nil { return }
         if status == "rejected" { continue }
         var sb strings.Builder
         sb.WriteString("BEGIN:VEVENT\n")
@@ -174,26 +204,24 @@ func (s *Server) handleMergedICS(w http.ResponseWriter, r *http.Request) {
     b.WriteString("PRODID:-//ocean-haven//Merged Calendar//EN\n")
     for _, e := range vevents { b.WriteString(e) }
     b.WriteString("END:VCALENDAR\n")
-    w.Header().Set("Content-Type", "text/calendar")
-    _, _ = w.Write([]byte(b.String()))
+    s.icsCache = b.String()
+    s.icsLastUpdated = time.Now()
 }
 
-func extractEventsFromICS(s string) []string {
-    re := regexp.MustCompile(`(?s)BEGIN:VEVENT.*?END:VEVENT\s*`)
-    return re.FindAllString(s, -1)
+func (s *Server) handleSyncIcal(w http.ResponseWriter, r *http.Request) {
+    c := getClaims(r)
+    var isOwner bool
+    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+    if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
+    s.refreshMergedICS(r.Context())
+    jsonResp(w, 200, map[string]any{"last_updated": s.icsLastUpdated.Format(time.RFC3339)})
 }
 
-func extractEventsFromICSWithCategory(s, category string) []string {
-    re := regexp.MustCompile(`(?s)BEGIN:VEVENT.*?END:VEVENT\s*`)
-    events := re.FindAllString(s, -1)
-    var out []string
-    for _, e := range events {
-        out = append(out, strings.Replace(e, "BEGIN:VEVENT\n", "BEGIN:VEVENT\nCATEGORIES:"+category+"\n", 1))
-    }
-    return out
+func (s *Server) handleLastSync(w http.ResponseWriter, r *http.Request) {
+    var ts time.Time
+    _ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(MAX(last_sync), now()) FROM icals").Scan(&ts)
+    jsonResp(w, 200, map[string]any{"last_updated": ts.Format(time.RFC3339)})
 }
-
-//
 
 func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
     c := getClaims(r)
@@ -279,12 +307,12 @@ func (s *Server) handleDashboardStats(w http.ResponseWriter, r *http.Request) {
     if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
     var totalBookings int64
-    var confirmedBookings int64
+    var approvedBookings int64
     var totalRevenue float64
     if err := s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings").Scan(&totalBookings); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
-    if err := s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings WHERE status='approved'").Scan(&confirmedBookings); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
-    if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(SUM(total_price)::float8, 0) FROM bookings WHERE status='approved'").Scan(&totalRevenue); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
-    jsonResp(w, 200, map[string]any{"total_bookings": totalBookings, "confirmed_bookings": confirmedBookings, "total_revenue": totalRevenue})
+    if err := s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings WHERE status='approved'").Scan(&approvedBookings); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(SUM(total_price)::float8, 0) FROM bookings WHERE status='paid'").Scan(&totalRevenue); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    jsonResp(w, 200, map[string]any{"total_bookings": totalBookings, "approved_bookings": approvedBookings, "total_revenue": totalRevenue})
 }
 
 func ensureSchema(ctx context.Context, pool *pgxpool.Pool) {
@@ -321,6 +349,8 @@ CREATE TABLE IF NOT EXISTS bookings (
   guest_phone TEXT,
   number_of_guests INT,
   total_price NUMERIC,
+  stripe_intent_id TEXT,
+  paid_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP
 );
@@ -332,96 +362,29 @@ CREATE TABLE IF NOT EXISTS messages (
   message TEXT,
   created_at TIMESTAMP DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS settings (
+  id SERIAL PRIMARY KEY,
+  owner_email TEXT,
+  property_name TEXT,
+  checkin_time TEXT,
+  checkout_time TEXT,
+  base_price NUMERIC,
+  weekend_price NUMERIC,
+  cleaning_fee NUMERIC,
+  service_fee NUMERIC,
+  discount_weekly NUMERIC,
+  discount_monthly NUMERIC,
+  updated_at TIMESTAMP DEFAULT now()
+);
 `)
-    _, _ = pool.Exec(ctx, `
+_, _ = pool.Exec(ctx, `
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS subtotal_price NUMERIC;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_amount NUMERIC;
+ALTER TABLE icals ADD COLUMN IF NOT EXISTS last_sync TIMESTAMP;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_intent_id TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_token TEXT;
 `)
-}
-
-func main() {
-    _ = godotenv.Load()
-    dsn := os.Getenv("PG_DSN")
-    if dsn == "" { dsn = "postgres://postgres:postgres@localhost:5432/mb_vacation?sslmode=disable" }
-    secret := os.Getenv("JWT_SECRET")
-    if secret == "" { secret = "dev-secret" }
-    cfg, _ := pgxpool.ParseConfig(dsn)
-    pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
-    if err != nil { panic(err) }
-    ensureSchema(context.Background(), pool)
-    if _, err := pool.Exec(context.Background(), "SELECT 1"); err == nil {
-        log.Println("Conexão com o banco de dados estabelecida com sucesso")
-    }
-    s := &Server{ pool: pool, jwtSecret: secret, hub: NewHub() }
-    r := mux.NewRouter()
-    r.Use(func(h http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-            origin := req.Header.Get("Origin")
-            if origin != "" {
-                w.Header().Set("Access-Control-Allow-Origin", origin)
-                w.Header().Set("Vary", "Origin")
-            } else {
-                w.Header().Set("Access-Control-Allow-Origin", "*")
-            }
-            w.Header().Set("Access-Control-Allow-Credentials", "true")
-            reqHeaders := req.Header.Get("Access-Control-Request-Headers")
-            if reqHeaders == "" { reqHeaders = "Authorization, Content-Type" }
-            w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
-            w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-            if req.Method == http.MethodOptions { w.WriteHeader(http.StatusNoContent); return }
-            h.ServeHTTP(w, req)
-    })
-    })
-    r.HandleFunc("/{_:.*}", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    // Explicit OPTIONS handlers for known routes to avoid 405 preflight failures
-    r.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/auth/register", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/auth/me", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/ical", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/ical/{id}", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/blocks", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/blocks/unblock", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/bookings", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/bookings/mine", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/bookings/{id}/approve", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/bookings/{id}/reject", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/ws/messages", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/calendar/merged.ics", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.HandleFunc("/stats/dashboard", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-    r.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-        origin := req.Header.Get("Origin")
-        if origin != "" { w.Header().Set("Access-Control-Allow-Origin", origin); w.Header().Set("Vary", "Origin") } else { w.Header().Set("Access-Control-Allow-Origin", "*") }
-        w.Header().Set("Access-Control-Allow-Credentials", "true")
-        reqHeaders := req.Header.Get("Access-Control-Request-Headers")
-        if reqHeaders == "" { reqHeaders = "Authorization, Content-Type" }
-        w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
-        w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-        if req.Method == http.MethodOptions { w.WriteHeader(http.StatusNoContent); return }
-        w.WriteHeader(http.StatusMethodNotAllowed)
-    })
-    r.HandleFunc("/auth/register", s.handleRegister).Methods("POST")
-    r.HandleFunc("/auth/login", s.handleLogin).Methods("POST")
-    r.Handle("/auth/me", s.authMiddleware(http.HandlerFunc(s.handleMe))).Methods("GET")
-    r.Handle("/ical", s.authMiddleware(http.HandlerFunc(s.handleAddIcal))).Methods("POST")
-    r.Handle("/ical", s.authMiddleware(http.HandlerFunc(s.handleListIcal))).Methods("GET")
-    r.Handle("/ical/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteIcal))).Methods("DELETE")
-    r.Handle("/blocks", s.authMiddleware(http.HandlerFunc(s.handleAddBlock))).Methods("POST")
-    r.Handle("/blocks", s.authMiddleware(http.HandlerFunc(s.handleListBlocks))).Methods("GET")
-    r.Handle("/blocks/unblock", s.authMiddleware(http.HandlerFunc(s.handleUnblockRange))).Methods("POST")
-    r.HandleFunc("/calendar/merged.ics", s.handleMergedICS).Methods("GET")
-    r.HandleFunc("/bookings", s.handleCreateBooking).Methods("POST")
-    r.Handle("/bookings", s.authMiddleware(http.HandlerFunc(s.handleListBookingsOwner))).Methods("GET")
-    r.Handle("/bookings/mine", s.authMiddleware(http.HandlerFunc(s.handleListBookingsMine))).Methods("GET")
-    r.Handle("/bookings/{id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApprove))).Methods("POST")
-    r.Handle("/bookings/{id}/reject", s.authMiddleware(http.HandlerFunc(s.handleReject))).Methods("POST")
-    r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handlePostMessage))).Methods("POST")
-    r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handleGetMessages))).Methods("GET")
-    r.HandleFunc("/ws/messages", s.handleWSMessages).Methods("GET")
-    r.Handle("/stats/dashboard", s.authMiddleware(http.HandlerFunc(s.handleDashboardStats))).Methods("GET")
-    port := os.Getenv("PORT")
-    if port == "" { port = "3005" }
-    http.ListenAndServe(":"+port, r)
 }
 
 func (s *Server) handleAddBlock(w http.ResponseWriter, r *http.Request) {
@@ -466,6 +429,7 @@ func (s *Server) handleUnblockRange(w http.ResponseWriter, r *http.Request) {
     _, _ = s.pool.Exec(r.Context(), "DELETE FROM blocks WHERE NOT (to_ts < $1 OR from_ts > $2)", from, to)
     jsonResp(w, 200, map[string]bool{"success": true})
 }
+
 type Hub struct {
     rooms map[string]map[*websocket.Conn]struct{}
 }
@@ -505,4 +469,212 @@ func (s *Server) handleWSMessages(w http.ResponseWriter, r *http.Request) {
             if _, _, err := conn.ReadMessage(); err != nil { break }
         }
     }()
+}
+
+func main() {
+    _ = godotenv.Load()
+    dsn := os.Getenv("PG_DSN")
+    if dsn == "" { dsn = "postgres://postgres:12345678@localhost:5432/mb-vacations?sslmode=disable" }
+    secret := os.Getenv("JWT_SECRET")
+    if secret == "" { secret = "dev-secret" }
+    cfg, _ := pgxpool.ParseConfig(dsn)
+    pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+    if err != nil { panic(err) }
+    ensureSchema(context.Background(), pool)
+    if _, err := pool.Exec(context.Background(), "SELECT 1"); err == nil {
+        log.Println("Conexão com o banco de dados estabelecida com sucesso")
+    }
+    stripeSecret := os.Getenv("STRIPE_SECRET_KEY")
+    stripePublic := os.Getenv("STRIPE_PUBLIC_KEY")
+    s := &Server{ pool: pool, jwtSecret: secret, hub: NewHub(), stripeSecret: stripeSecret, stripePublic: stripePublic }
+    r := mux.NewRouter()
+    r.Use(func(h http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+            origin := req.Header.Get("Origin")
+            if origin != "" {
+                w.Header().Set("Access-Control-Allow-Origin", origin)
+                w.Header().Set("Vary", "Origin")
+            } else {
+                w.Header().Set("Access-Control-Allow-Origin", "*")
+            }
+            w.Header().Set("Access-Control-Allow-Credentials", "true")
+            reqHeaders := req.Header.Get("Access-Control-Request-Headers")
+            if reqHeaders == "" { reqHeaders = "Authorization, Content-Type" }
+            w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
+            w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+            if req.Method == http.MethodOptions { w.WriteHeader(http.StatusNoContent); return }
+            h.ServeHTTP(w, req)
+    })
+    })
+    r.HandleFunc("/{_:.*}", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    // Explicit OPTIONS handlers for known routes to avoid 405 preflight failures
+    r.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/auth/register", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/auth/me", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/ical", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/ical/{id}", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/ical/sync", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/ical/last-sync", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/blocks", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/blocks/unblock", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/bookings", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/bookings/mine", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/bookings/{id}/approve", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/bookings/{id}/reject", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/ws/messages", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/calendar/merged.ics", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.HandleFunc("/stats/dashboard", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+    r.MethodNotAllowedHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+        origin := req.Header.Get("Origin")
+        if origin != "" { w.Header().Set("Access-Control-Allow-Origin", origin); w.Header().Set("Vary", "Origin") } else { w.Header().Set("Access-Control-Allow-Origin", "*") }
+        w.Header().Set("Access-Control-Allow-Credentials", "true")
+        reqHeaders := req.Header.Get("Access-Control-Request-Headers")
+        if reqHeaders == "" { reqHeaders = "Authorization, Content-Type" }
+        w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
+        w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+        if req.Method == http.MethodOptions { w.WriteHeader(http.StatusNoContent); return }
+        w.WriteHeader(http.StatusMethodNotAllowed)
+    })
+    r.HandleFunc("/auth/register", s.handleRegister).Methods("POST")
+    r.HandleFunc("/auth/login", s.handleLogin).Methods("POST")
+    r.Handle("/auth/me", s.authMiddleware(http.HandlerFunc(s.handleMe))).Methods("GET")
+    r.Handle("/ical", s.authMiddleware(http.HandlerFunc(s.handleAddIcal))).Methods("POST")
+    r.Handle("/ical", s.authMiddleware(http.HandlerFunc(s.handleListIcal))).Methods("GET")
+    r.Handle("/ical/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteIcal))).Methods("DELETE")
+    r.Handle("/ical/sync", s.authMiddleware(http.HandlerFunc(s.handleSyncIcal))).Methods("POST")
+    r.Handle("/ical/last-sync", s.authMiddleware(http.HandlerFunc(s.handleLastSync))).Methods("GET")
+    r.Handle("/blocks", s.authMiddleware(http.HandlerFunc(s.handleAddBlock))).Methods("POST")
+    r.Handle("/blocks", s.authMiddleware(http.HandlerFunc(s.handleListBlocks))).Methods("GET")
+    r.Handle("/blocks/unblock", s.authMiddleware(http.HandlerFunc(s.handleUnblockRange))).Methods("POST")
+    r.HandleFunc("/calendar/merged.ics", s.handleMergedICS).Methods("GET")
+    r.HandleFunc("/settings/public", s.handleGetSettingsPublic).Methods("GET")
+    r.HandleFunc("/bookings", s.handleCreateBooking).Methods("POST")
+    r.Handle("/bookings", s.authMiddleware(http.HandlerFunc(s.handleListBookingsOwner))).Methods("GET")
+    r.Handle("/bookings/mine", s.authMiddleware(http.HandlerFunc(s.handleListBookingsMine))).Methods("GET")
+    r.Handle("/bookings/{id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApprove))).Methods("POST")
+    r.Handle("/bookings/{id}/reject", s.authMiddleware(http.HandlerFunc(s.handleReject))).Methods("POST")
+    r.HandleFunc("/bookings/{id}/payment-intent", s.handleCreatePaymentIntent).Methods("POST")
+    r.HandleFunc("/bookings/{id}/mark-paid", s.handleMarkPaid).Methods("POST")
+    r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handlePostMessage))).Methods("POST")
+    r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handleGetMessages))).Methods("GET")
+    r.HandleFunc("/ws/messages", s.handleWSMessages).Methods("GET")
+    r.Handle("/stats/dashboard", s.authMiddleware(http.HandlerFunc(s.handleDashboardStats))).Methods("GET")
+    r.Handle("/settings", s.authMiddleware(http.HandlerFunc(s.handleGetSettings))).Methods("GET")
+    r.Handle("/settings", s.authMiddleware(http.HandlerFunc(s.handlePutSettings))).Methods("PUT")
+    go func() {
+        for {
+            s.refreshMergedICS(context.Background())
+            time.Sleep(10 * time.Minute)
+        }
+    }()
+    port := os.Getenv("PORT")
+    if port == "" { port = "3005" }
+    log.Printf("Servidor iniciado na porta %s", port)
+    http.ListenAndServe(":"+port, r)
+}
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+    c := getClaims(r)
+    var isOwner bool
+    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+    if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
+    row := s.pool.QueryRow(r.Context(), "SELECT COALESCE(property_name,''), COALESCE(checkin_time,''), COALESCE(checkout_time,''), COALESCE(base_price,0)::float8, COALESCE(weekend_price,0)::float8, COALESCE(cleaning_fee,0)::float8, COALESCE(service_fee,0)::float8, COALESCE(discount_weekly,0)::float8, COALESCE(discount_monthly,0)::float8 FROM settings WHERE owner_email=$1 ORDER BY id DESC LIMIT 1", c["email"])
+    var propertyName, checkin, checkout string
+    var base, weekend, cleaning, service, dw, dm float64
+    _ = row.Scan(&propertyName, &checkin, &checkout, &base, &weekend, &cleaning, &service, &dw, &dm)
+    jsonResp(w, 200, map[string]any{"settings": map[string]any{"property_name": propertyName, "checkin_time": checkin, "checkout_time": checkout, "base_price": base, "weekend_price": weekend, "cleaning_fee": cleaning, "service_fee": service, "discount_weekly": dw, "discount_monthly": dm}})
+}
+func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+    c := getClaims(r)
+    var isOwner bool
+    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+    if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
+    var body struct{
+        PropertyName string
+        CheckinTime string
+        CheckoutTime string
+        BasePrice float64
+        WeekendPrice float64
+        CleaningFee float64
+        ServiceFee float64
+        DiscountWeekly float64
+        DiscountMonthly float64
+    }
+    _ = json.NewDecoder(r.Body).Decode(&body)
+    var exists bool
+    _ = s.pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM settings WHERE owner_email=$1)", c["email"]).Scan(&exists)
+    if exists {
+        _, _ = s.pool.Exec(r.Context(), "UPDATE settings SET property_name=$1, checkin_time=$2, checkout_time=$3, base_price=$4, weekend_price=$5, cleaning_fee=$6, service_fee=$7, discount_weekly=$8, discount_monthly=$9, updated_at=now() WHERE owner_email=$10", body.PropertyName, body.CheckinTime, body.CheckoutTime, body.BasePrice, body.WeekendPrice, body.CleaningFee, body.ServiceFee, body.DiscountWeekly, body.DiscountMonthly, c["email"])
+    } else {
+        _, _ = s.pool.Exec(r.Context(), "INSERT INTO settings (owner_email, property_name, checkin_time, checkout_time, base_price, weekend_price, cleaning_fee, service_fee, discount_weekly, discount_monthly) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", c["email"], body.PropertyName, body.CheckinTime, body.CheckoutTime, body.BasePrice, body.WeekendPrice, body.CleaningFee, body.ServiceFee, body.DiscountWeekly, body.DiscountMonthly)
+    }
+    jsonResp(w, 200, map[string]bool{"success": true})
+}
+func (s *Server) handleGetSettingsPublic(w http.ResponseWriter, r *http.Request) {
+    row := s.pool.QueryRow(r.Context(), "SELECT COALESCE(property_name,''), COALESCE(checkin_time,''), COALESCE(checkout_time,''), COALESCE(base_price,0)::float8, COALESCE(weekend_price,0)::float8, COALESCE(cleaning_fee,0)::float8, COALESCE(service_fee,0)::float8, COALESCE(discount_weekly,0)::float8, COALESCE(discount_monthly,0)::float8 FROM settings ORDER BY id DESC LIMIT 1")
+    var propertyName, checkin, checkout string
+    var base, weekend, cleaning, service, dw, dm float64
+    _ = row.Scan(&propertyName, &checkin, &checkout, &base, &weekend, &cleaning, &service, &dw, &dm)
+    jsonResp(w, 200, map[string]any{"settings": map[string]any{"property_name": propertyName, "checkin_time": checkin, "checkout_time": checkout, "base_price": base, "weekend_price": weekend, "cleaning_fee": cleaning, "service_fee": service, "discount_weekly": dw, "discount_monthly": dm}})
+}
+
+func (s *Server) handleCreatePaymentIntent(w http.ResponseWriter, r *http.Request) {
+    c := getClaims(r)
+    id := mux.Vars(r)["id"]
+    if id == "" { jsonResp(w, 400, map[string]string{"error":"missing_id"}); return }
+    if s.stripeSecret == "" { jsonResp(w, 500, map[string]string{"error":"stripe_not_configured"}); return }
+    var userEmail, status string
+    var total float64
+    var guestEmail, guestName string
+    err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(user_email,''), COALESCE(status,'requested'), COALESCE(total_price,0)::float8, COALESCE(guest_email,''), COALESCE(guest_name,'') FROM bookings WHERE id=$1", id).Scan(&userEmail, &status, &total, &guestEmail, &guestName)
+    if err != nil { jsonResp(w, 404, map[string]string{"error":"booking_not_found"}); return }
+    var isOwner bool
+    _ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+    if !isOwner && c["email"] != userEmail { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
+    if status != "approved" { jsonResp(w, 409, map[string]string{"error":"booking_not_approved"}); return }
+    amount := int64(total * 100)
+    form := url.Values{}
+    form.Set("amount", fmt.Sprintf("%d", amount))
+    form.Set("currency", "brl")
+    form.Set("automatic_payment_methods[enabled]", "true")
+    form.Set("description", "Reserva "+guestName)
+    form.Set("metadata[booking_id]", id)
+    req, _ := http.NewRequest("POST", "https://api.stripe.com/v1/payment_intents", strings.NewReader(form.Encode()))
+    req.Header.Set("Authorization", "Bearer "+s.stripeSecret)
+    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    defer resp.Body.Close()
+    body, _ := io.ReadAll(resp.Body)
+    if resp.StatusCode >= 300 {
+      jsonResp(w, resp.StatusCode, map[string]any{"error":"stripe_error", "body": string(body)})
+      return
+    }
+    var si struct{ ID string `json:"id"`; ClientSecret string `json:"client_secret"` }
+    _ = json.Unmarshal(body, &si)
+    if si.ID != "" { _, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET stripe_intent_id=$1 WHERE id=$2", si.ID, id) }
+    jsonResp(w, 200, map[string]any{"client_secret": si.ClientSecret, "publishable_key": s.stripePublic})
+}
+
+func (s *Server) handleMarkPaid(w http.ResponseWriter, r *http.Request) {
+    id := mux.Vars(r)["id"]
+    if id == "" { jsonResp(w, 400, map[string]string{"error":"missing_id"}); return }
+    if s.stripeSecret == "" { jsonResp(w, 500, map[string]string{"error":"stripe_not_configured"}); return }
+    var intentID string
+    _ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(stripe_intent_id,'') FROM bookings WHERE id=$1", id).Scan(&intentID)
+    if intentID == "" { jsonResp(w, 409, map[string]string{"error":"no_intent"}); return }
+    req, _ := http.NewRequest("GET", "https://api.stripe.com/v1/payment_intents/"+intentID, nil)
+    req.Header.Set("Authorization", "Bearer "+s.stripeSecret)
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    defer resp.Body.Close()
+    body, _ := io.ReadAll(resp.Body)
+    var si struct{ Status string `json:"status"` }
+    _ = json.Unmarshal(body, &si)
+    if si.Status == "succeeded" {
+        _, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET status='paid', paid_at=now(), updated_at=now() WHERE id=$1", id)
+        jsonResp(w, 200, map[string]bool{"paid": true})
+        return
+    }
+    jsonResp(w, 200, map[string]any{"paid": false, "status": si.Status})
 }

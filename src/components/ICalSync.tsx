@@ -16,9 +16,11 @@ export function ICalSync() {
   const [loading, setLoading] = useState(true);
   const [newPlatform, setNewPlatform] = useState("");
   const [newUrl, setNewUrl] = useState("");
+  const [lastUpdated, setLastUpdated] = useState<string>("");
 
   useEffect(() => {
     loadSyncs();
+    loadLastSync();
   }, []);
 
   const loadSyncs = async () => {
@@ -28,6 +30,16 @@ export function ICalSync() {
     if (!res.ok) { toast.error("Erro ao carregar sincronizações"); }
     else { const j = await res.json(); setSyncs(j.data || []); }
     setLoading(false);
+  };
+
+  const loadLastSync = async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    const API = "http://localhost:3005";
+    const res = await fetch(`${API}/ical/last-sync`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    const j = await res.json();
+    setLastUpdated(j.last_updated || "");
   };
 
   const addSync = async () => {
@@ -48,6 +60,9 @@ export function ICalSync() {
     setNewPlatform("");
     setNewUrl("");
     loadSyncs();
+    const syncRes = await fetch(`${API}/ical/sync`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    if (syncRes.ok) { const j = await syncRes.json(); setLastUpdated(j.last_updated || ""); }
+    document.dispatchEvent(new Event('ical:updated'));
   };
 
   const removeSync = async (id: number) => {
@@ -58,10 +73,21 @@ export function ICalSync() {
     if (!res.ok) { toast.error("Erro ao remover"); return; }
     toast.success("Sincronização removida");
     loadSyncs();
+    const syncRes = await fetch(`${API}/ical/sync`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    if (syncRes.ok) { const j = await syncRes.json(); setLastUpdated(j.last_updated || ""); }
+    document.dispatchEvent(new Event('ical:updated'));
   };
 
   const syncNow = async (_id: number) => {
-    toast.info("Sincronização iniciada... (funcionalidade em desenvolvimento)");
+    const token = localStorage.getItem("token");
+    if (!token) { toast.error("Faça login"); return; }
+    const API = "http://localhost:3005";
+    const res = await fetch(`${API}/ical/sync`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) { toast.error("Erro ao sincronizar"); return; }
+    const j = await res.json();
+    setLastUpdated(j.last_updated || "");
+    toast.success("Sincronizado");
+    document.dispatchEvent(new Event('ical:updated'));
     loadSyncs();
   };
 
@@ -143,27 +169,30 @@ export function ICalSync() {
               </CardContent>
             </Card>
 
-            <Card className="bg-background/50 border-border">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Globe className="h-4 w-4" /> Nosso iCal URL
-                </CardTitle>
-                <CardDescription>Compartilhe seu calendário público</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex gap-2">
-                  <Input readOnly value={`http://localhost:3005/calendar/merged.ics`} />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => navigator.clipboard.writeText(`http://localhost:3005/calendar/merged.ics`)}
-                    title="Copiar URL"
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+          <Card className="bg-background/50 border-border">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="h-4 w-4" /> Nosso iCal URL
+              </CardTitle>
+              <CardDescription>Compartilhe seu calendário público</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex gap-2">
+                <Input readOnly value={`http://localhost:3005/calendar/merged.ics`} />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => navigator.clipboard.writeText(`http://localhost:3005/calendar/merged.ics`)}
+                  title="Copiar URL"
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              {lastUpdated && (
+                <p className="text-xs text-muted-foreground">Última atualização: {new Date(lastUpdated).toLocaleString('pt-BR')}</p>
+              )}
+            </CardContent>
+          </Card>
           </div>
         </div>
 
@@ -186,7 +215,7 @@ export function ICalSync() {
                     <p className="font-semibold">{sync.platform}</p>
                     <Badge variant={"default"}>Ativo</Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground truncate max-w-md">
+                  <p className="text-xs text-muted-foreground break-all">
                     {sync.url}
                   </p>
                   {sync.created_at && (

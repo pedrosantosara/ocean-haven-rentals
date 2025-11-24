@@ -1,5 +1,5 @@
 import { Navigation } from '@/components/Navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Card,
@@ -50,25 +50,70 @@ export default function MyBooking() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [showPayment, setShowPayment] = useState(false);
+  const [publishableKey, setPublishableKey] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [isPaying, setIsPaying] = useState(false);
+  const paymentContainerRef = useRef<HTMLDivElement | null>(null);
+  const stripeRef = useRef<any>(null);
+  const elementsRef = useRef<any>(null);
+
+  const loadStripeScript = async () => {
+    if ((window as any).Stripe) return;
+    await new Promise<void>((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://js.stripe.com/v3';
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('stripe_js_load_failed'));
+      document.body.appendChild(s);
+    });
+  };
 
   const handlePay = async () => {
     if (!booking) return;
+    if (booking.status !== 'confirmed') { toast.error('A reserva precisa ser aceita antes do pagamento'); return; }
     try {
-      const amountNumber =
-        typeof booking.total_price === 'string'
-          ? parseFloat(booking.total_price)
-          : booking.total_price;
-      const amountCents = Math.round(amountNumber * 100);
-      const { data, error } = await supabase.functions.invoke(
-        'create-payment',
-        {
-          body: { bookingId: booking.id, amount: amountCents },
-        }
-      );
-      if (error) throw error;
-      window.location.href = data.url;
-    } catch (error: unknown) {
+      const token = localStorage.getItem('token');
+      if (!token) { toast.error('Faça login'); return; }
+      const API = 'http://localhost:3005';
+      const r = await fetch(`${API}/bookings/${booking.id}/payment-intent`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) { toast.error('Falha ao iniciar pagamento'); return; }
+      const j = await r.json();
+      setPublishableKey(String(j.publishable_key || ''));
+      setClientSecret(String(j.client_secret || ''));
+      await loadStripeScript();
+      const stripe = (window as any).Stripe(String(j.publishable_key || ''));
+      const elements = stripe.elements({ clientSecret: String(j.client_secret || '') });
+      const paymentElement = elements.create('payment');
+      stripeRef.current = stripe;
+      elementsRef.current = elements;
+      setShowPayment(true);
+      setTimeout(() => {
+        if (paymentContainerRef.current) { paymentContainerRef.current.innerHTML = ''; paymentElement.mount(paymentContainerRef.current); }
+      }, 0);
+    } catch {
       toast.error('Falha ao iniciar pagamento');
+    }
+  };
+
+  const confirmPay = async () => {
+    if (!booking || !stripeRef.current || !elementsRef.current) return;
+    try {
+      setIsPaying(true);
+      const stripe = stripeRef.current;
+      const elements = elementsRef.current;
+      const result = await stripe.confirmPayment({ elements, redirect: 'if_required' });
+      if (result.error) { toast.error('Pagamento não confirmado'); setIsPaying(false); return; }
+      const token = localStorage.getItem('token');
+      const API = 'http://localhost:3005';
+      const r = await fetch(`${API}/bookings/${booking.id}/mark-paid`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const jr = await r.json();
+      if (jr.paid) { toast.success('Pagamento confirmado'); setShowPayment(false); await loadBookingAndMessages(); }
+      else { toast.error('Pagamento pendente'); }
+    } catch {
+      toast.error('Erro ao confirmar pagamento');
+    } finally {
+      setIsPaying(false);
     }
   };
 
@@ -326,6 +371,12 @@ export default function MyBooking() {
                             >
                           Processar Pagamento
                         </Button>
+                        {showPayment && (
+                          <div className='mt-4 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
+                            <div ref={paymentContainerRef} />
+                            <Button onClick={confirmPay} className='w-full mt-4' disabled={isPaying}>{isPaying ? 'Processando...' : 'Pagar'}</Button>
+                          </div>
+                        )}
                       </div>
                       <p className='mt-3 text-xs md:text-sm text-muted-foreground'>
                         Price breakdown

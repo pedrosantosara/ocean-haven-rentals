@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import { Calendar, Mail, User, CheckCircle2, XCircle, CalendarDays, CalendarCheck, Wallet } from 'lucide-react';
 
 export default function Dashboard() {
-  type Booking = { id: string; guest_name: string; guest_email: string; check_in: string; check_out: string; total_price: number; status: 'pending'|'confirmed'|'cancelled'|'completed'; number_of_guests: number };
+  type Booking = { id: string; guest_name: string; guest_email: string; check_in: string; check_out: string; total_price: number; status: 'pending' | 'confirmed' | 'cancelled' | 'completed'; number_of_guests: number };
   const [stats, setStats] = useState<{ total_bookings: number; confirmed_bookings: number; total_revenue: number } | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   type Message = { id: number; booking_id: string; sender_email: string; is_from_owner: boolean; message: string; created_at: string };
@@ -110,7 +110,7 @@ export default function Dashboard() {
         }
       } catch (e) { void e; }
     };
-    
+
     return () => { if (wsRef.current) { wsRef.current.close(); wsRef.current = null; } };
   }, [showDialog, selectedBooking]);
   return (
@@ -122,51 +122,51 @@ export default function Dashboard() {
           <h1 className='text-3xl md:text-5xl font-bold mb-8 md:mb-12 text-gradient'>Dashboard</h1>
 
           <div className='grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-8'>
-            <Card className='relative overflow-hidden glass-ocean border-gradient-ocean shadow-ocean hover:shadow-ocean transition-all duration-300'>
-              <CardHeader>
+            <Card className='relative overflow-hidden bg-white border border-border/50 shadow-sm hover:shadow-md transition-all duration-300 rounded-xl'>
+              <CardHeader className='pb-2'>
                 <div className='flex items-center justify-between'>
-                  <CardTitle className='text-gradient'>Total de Reservas</CardTitle>
-                  <div className='h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center'>
-                    <CalendarDays className='h-5 w-5' />
+                  <CardTitle className='text-sm font-medium text-muted-foreground'>Total de Reservas</CardTitle>
+                  <div className='h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center'>
+                    <CalendarDays className='h-4 w-4' />
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
-                <p className='text-4xl font-bold text-primary'>
+                <div className='text-2xl font-bold text-foreground'>
                   {stats ? stats.total_bookings : '—'}
-                </p>
+                </div>
               </CardContent>
             </Card>
 
-            <Card className='relative overflow-hidden glass-ocean border-gradient-ocean shadow-ocean hover:shadow-ocean transition-all duration-300'>
-              <CardHeader>
+            <Card className='relative overflow-hidden bg-white border border-border/50 shadow-sm hover:shadow-md transition-all duration-300 rounded-xl'>
+              <CardHeader className='pb-2'>
                 <div className='flex items-center justify-between'>
-                  <CardTitle className='text-gradient'>Reservas Confirmadas</CardTitle>
-                  <div className='h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center'>
-                    <CalendarCheck className='h-5 w-5' />
+                  <CardTitle className='text-sm font-medium text-muted-foreground'>Reservas Confirmadas</CardTitle>
+                  <div className='h-8 w-8 rounded-full bg-green-500/10 text-green-600 flex items-center justify-center'>
+                    <CalendarCheck className='h-4 w-4' />
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
-                <p className='text-4xl font-bold text-primary'>
+                <div className='text-2xl font-bold text-foreground'>
                   {stats ? stats.confirmed_bookings : '—'}
-                </p>
+                </div>
               </CardContent>
             </Card>
 
-            <Card className='relative overflow-hidden glass-ocean border-gradient-ocean shadow-ocean hover:shadow-ocean transition-all duration-300'>
-              <CardHeader>
+            <Card className='relative overflow-hidden bg-white border border-border/50 shadow-sm hover:shadow-md transition-all duration-300 rounded-xl'>
+              <CardHeader className='pb-2'>
                 <div className='flex items-center justify-between'>
-                  <CardTitle className='text-gradient'>Receita Total</CardTitle>
-                  <div className='h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center'>
-                    <Wallet className='h-5 w-5' />
+                  <CardTitle className='text-sm font-medium text-muted-foreground'>Receita Total</CardTitle>
+                  <div className='h-8 w-8 rounded-full bg-blue-500/10 text-blue-600 flex items-center justify-center'>
+                    <Wallet className='h-4 w-4' />
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
-                <p className='text-4xl font-bold text-primary'>
+                <div className='text-2xl font-bold text-foreground'>
                   {stats ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.total_revenue) : '—'}
-                </p>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -174,26 +174,26 @@ export default function Dashboard() {
             <ICSCalendarPreview />
           </div>
           <div className='mt-10'>
-            <h2 className='text-2xl font-bold mb-4'>Solicitações Pendentes</h2>
+            <h2 className='text-xl font-semibold mb-4 text-foreground'>Solicitações Pendentes</h2>
             <div className='grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6'>
               {bookings.filter((b) => b.status === 'pending').map((b) => (
-                <Card key={b.id} className='relative overflow-hidden glass-ocean border-primary/30 shadow-ocean hover:shadow-ocean transition-all duration-300'>
-                  <CardHeader>
+                <Card key={b.id} className='relative overflow-hidden bg-white border border-border/50 shadow-sm hover:shadow-md transition-all duration-300 rounded-xl'>
+                  <CardHeader className='pb-3'>
                     <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
                       <div className='flex items-center gap-3 min-w-0'>
-                        <div className='h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold'>
-                          {(b.guest_name || '?').split(' ').filter(Boolean).map((s) => s[0]).slice(0,2).join('').toUpperCase()}
+                        <div className='h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm'>
+                          {(b.guest_name || '?').split(' ').filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase()}
                         </div>
                         <div className='min-w-0'>
-                          <CardTitle className='m-0'>{b.guest_name}</CardTitle>
-                          <div className='flex items-center text-sm text-muted-foreground min-w-0'>
-                            <Mail className='h-4 w-4 mr-1 shrink-0' />
+                          <CardTitle className='text-base font-semibold m-0'>{b.guest_name}</CardTitle>
+                          <div className='flex items-center text-xs text-muted-foreground min-w-0 mt-0.5'>
+                            <Mail className='h-3 w-3 mr-1 shrink-0' />
                             <span className='truncate'>{b.guest_email}</span>
                           </div>
                         </div>
                       </div>
                       <div className='flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full sm:w-auto'>
-                        <Button size='sm' variant='gradient' className='gap-2 w-full sm:w-auto' onClick={async () => {
+                        <Button size='sm' className='gap-2 w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white shadow-none' onClick={async () => {
                           const token = localStorage.getItem('token');
                           if (!token) return;
                           const res = await fetch(`${API}/bookings/${b.id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
@@ -218,10 +218,10 @@ export default function Dashboard() {
                           });
                           setBookings(mapped);
                         }}>
-                          <CheckCircle2 className='h-4 w-4' />
+                          <CheckCircle2 className='h-3.5 w-3.5' />
                           Aprovar
                         </Button>
-                        <Button size='sm' variant='destructive' className='gap-2 w-full sm:w-auto' onClick={async () => {
+                        <Button size='sm' variant='destructive' className='gap-2 w-full sm:w-auto shadow-none' onClick={async () => {
                           const token = localStorage.getItem('token');
                           if (!token) return;
                           const res = await fetch(`${API}/bookings/${b.id}/reject`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
@@ -246,40 +246,40 @@ export default function Dashboard() {
                           });
                           setBookings(mapped);
                         }}>
-                          <XCircle className='h-4 w-4' />
+                          <XCircle className='h-3.5 w-3.5' />
                           Recusar
                         </Button>
                       </div>
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
-                      <div className='flex items-center gap-2'>
-                        <Calendar className='h-4 w-4 text-muted-foreground' />
-                        <div>
-                          <div className='text-xs text-muted-foreground'>Check-in</div>
-                          <div className='font-semibold'>{new Date(b.check_in).toLocaleDateString('pt-BR')}</div>
+                    <div className='grid grid-cols-2 gap-4 text-sm'>
+                      <div className='flex flex-col gap-1'>
+                        <span className='text-xs text-muted-foreground'>Check-in</span>
+                        <div className='flex items-center gap-1.5 font-medium'>
+                          <Calendar className='h-3.5 w-3.5 text-muted-foreground' />
+                          {new Date(b.check_in).toLocaleDateString('pt-BR')}
                         </div>
                       </div>
-                      <div className='flex items-center gap-2'>
-                        <Calendar className='h-4 w-4 text-muted-foreground' />
-                        <div>
-                          <div className='text-xs text-muted-foreground'>Check-out</div>
-                          <div className='font-semibold'>{new Date(b.check_out).toLocaleDateString('pt-BR')}</div>
+                      <div className='flex flex-col gap-1'>
+                        <span className='text-xs text-muted-foreground'>Check-out</span>
+                        <div className='flex items-center gap-1.5 font-medium'>
+                          <Calendar className='h-3.5 w-3.5 text-muted-foreground' />
+                          {new Date(b.check_out).toLocaleDateString('pt-BR')}
                         </div>
                       </div>
-                      <div className='flex items-center gap-2'>
-                        <User className='h-4 w-4 text-muted-foreground' />
-                        <div>
-                          <div className='text-xs text-muted-foreground'>Hóspedes</div>
-                          <div className='font-semibold'>{b.number_of_guests}</div>
+                      <div className='flex flex-col gap-1'>
+                        <span className='text-xs text-muted-foreground'>Hóspedes</span>
+                        <div className='flex items-center gap-1.5 font-medium'>
+                          <User className='h-3.5 w-3.5 text-muted-foreground' />
+                          {b.number_of_guests}
                         </div>
                       </div>
-                      <div className='flex items-center gap-2'>
-                        <Badge variant='default' className='mr-2'>R$</Badge>
-                        <div>
-                          <div className='text-xs text-muted-foreground'>Total</div>
-                          <div className='font-semibold'>{new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(b.total_price)}</div>
+                      <div className='flex flex-col gap-1'>
+                        <span className='text-xs text-muted-foreground'>Total</span>
+                        <div className='flex items-center gap-1.5 font-medium text-primary'>
+                          <Badge variant='outline' className='h-5 px-1.5 text-[10px] border-primary/20 text-primary bg-primary/5'>R$</Badge>
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(b.total_price)}
                         </div>
                       </div>
                     </div>
@@ -287,37 +287,37 @@ export default function Dashboard() {
                 </Card>
               ))}
               {bookings.filter((b) => b.status === 'pending').length === 0 && (
-                <div className='text-muted-foreground'>Sem solicitações pendentes no momento</div>
+                <div className='text-muted-foreground text-sm italic'>Sem solicitações pendentes no momento</div>
               )}
             </div>
           </div>
           <div className='mt-10'>
-            <h2 className='text-2xl font-bold mb-4'>Reservas Confirmadas</h2>
+            <h2 className='text-xl font-semibold mb-4 text-foreground'>Reservas Confirmadas</h2>
             <div className='grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6'>
               {bookings.filter((b) => b.status === 'confirmed').map((b) => (
-                <Card key={b.id} className='relative overflow-hidden glass-ocean border-primary/30 shadow-ocean hover:shadow-ocean transition-all duration-300'>
-                  <CardHeader>
+                <Card key={b.id} className='relative overflow-hidden bg-white border border-border/50 shadow-sm hover:shadow-md transition-all duration-300 rounded-xl'>
+                  <CardHeader className='pb-3'>
                     <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
                       <div className='flex items-center gap-3 min-w-0'>
-                        <div className='h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold'>
-                          {(b.guest_name || '?').split(' ').filter(Boolean).map((s) => s[0]).slice(0,2).join('').toUpperCase()}
+                        <div className='h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm'>
+                          {(b.guest_name || '?').split(' ').filter(Boolean).map((s) => s[0]).slice(0, 2).join('').toUpperCase()}
                         </div>
                         <div className='min-w-0'>
-                          <CardTitle className='m-0'>{b.guest_name}</CardTitle>
-                          <div className='flex items-center text-sm text-muted-foreground min-w-0'>
-                            <Mail className='h-4 w-4 mr-1 shrink-0' />
+                          <CardTitle className='text-base font-semibold m-0'>{b.guest_name}</CardTitle>
+                          <div className='flex items-center text-xs text-muted-foreground min-w-0 mt-0.5'>
+                            <Mail className='h-3 w-3 mr-1 shrink-0' />
                             <span className='truncate'>{b.guest_email}</span>
                           </div>
                         </div>
                       </div>
                       <div className='flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full sm:w-auto'>
-                        <Button size='sm' variant='gradient' className='gap-2 shadow-ocean hover:shadow-ocean transition-all duration-300 w-full sm:w-auto' onClick={() => { navigate(`/chat/${b.id}`); }}>
+                        <Button size='sm' variant='outline' className='gap-2 w-full sm:w-auto shadow-none' onClick={() => { navigate(`/chat/${b.id}`); }}>
                           Chat
                         </Button>
                         <Button
                           size='sm'
-                          variant='outline'
-                          className='gap-2 w-full sm:w-auto'
+                          variant='secondary'
+                          className='gap-2 w-full sm:w-auto shadow-none'
                           onClick={() => {
                             const from = new Date(b.check_in).toISOString().split('T')[0];
                             const to = new Date(b.check_out).toISOString().split('T')[0];
@@ -330,33 +330,33 @@ export default function Dashboard() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
-                      <div className='flex items-center gap-2'>
-                        <Calendar className='h-4 w-4 text-muted-foreground' />
-                        <div>
-                          <div className='text-xs text-muted-foreground'>Check-in</div>
-                          <div className='font-semibold'>{new Date(b.check_in).toLocaleDateString('pt-BR')}</div>
+                    <div className='grid grid-cols-2 gap-4 text-sm'>
+                      <div className='flex flex-col gap-1'>
+                        <span className='text-xs text-muted-foreground'>Check-in</span>
+                        <div className='flex items-center gap-1.5 font-medium'>
+                          <Calendar className='h-3.5 w-3.5 text-muted-foreground' />
+                          {new Date(b.check_in).toLocaleDateString('pt-BR')}
                         </div>
                       </div>
-                      <div className='flex items-center gap-2'>
-                        <Calendar className='h-4 w-4 text-muted-foreground' />
-                        <div>
-                          <div className='text-xs text-muted-foreground'>Check-out</div>
-                          <div className='font-semibold'>{new Date(b.check_out).toLocaleDateString('pt-BR')}</div>
+                      <div className='flex flex-col gap-1'>
+                        <span className='text-xs text-muted-foreground'>Check-out</span>
+                        <div className='flex items-center gap-1.5 font-medium'>
+                          <Calendar className='h-3.5 w-3.5 text-muted-foreground' />
+                          {new Date(b.check_out).toLocaleDateString('pt-BR')}
                         </div>
                       </div>
-                      <div className='flex items-center gap-2'>
-                        <User className='h-4 w-4 text-muted-foreground' />
-                        <div>
-                          <div className='text-xs text-muted-foreground'>Hóspedes</div>
-                          <div className='font-semibold'>{b.number_of_guests}</div>
+                      <div className='flex flex-col gap-1'>
+                        <span className='text-xs text-muted-foreground'>Hóspedes</span>
+                        <div className='flex items-center gap-1.5 font-medium'>
+                          <User className='h-3.5 w-3.5 text-muted-foreground' />
+                          {b.number_of_guests}
                         </div>
                       </div>
-                      <div className='flex items-center gap-2'>
-                        <Badge variant='default' className='mr-2'>R$</Badge>
-                        <div>
-                          <div className='text-xs text-muted-foreground'>Total</div>
-                          <div className='font-semibold'>{new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(b.total_price)}</div>
+                      <div className='flex flex-col gap-1'>
+                        <span className='text-xs text-muted-foreground'>Total</span>
+                        <div className='flex items-center gap-1.5 font-medium text-primary'>
+                          <Badge variant='outline' className='h-5 px-1.5 text-[10px] border-primary/20 text-primary bg-primary/5'>R$</Badge>
+                          {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(b.total_price)}
                         </div>
                       </div>
                     </div>
@@ -364,53 +364,53 @@ export default function Dashboard() {
                 </Card>
               ))}
               {bookings.filter((b) => b.status === 'confirmed').length === 0 && (
-                <div className='text-muted-foreground'>Sem reservas confirmadas no momento</div>
+                <div className='text-muted-foreground text-sm italic'>Sem reservas confirmadas no momento</div>
               )}
             </div>
           </div>
           <Dialog open={showDialog} onOpenChange={setShowDialog}>
-            <DialogContent className='glass-ocean border-primary/20 text-white'>
+            <DialogContent className='bg-white border-border text-foreground sm:max-w-[500px]'>
               <DialogHeader>
-                <DialogTitle className='text-white'>Chat com o hóspede</DialogTitle>
+                <DialogTitle className='text-foreground'>Chat com o hóspede</DialogTitle>
               </DialogHeader>
               {selectedBooking && (
-                <div className='space-y-3'>
-                  <div className='grid grid-cols-2 gap-4'>
+                <div className='space-y-4'>
+                  <div className='grid grid-cols-2 gap-4 p-3 bg-muted/30 rounded-lg'>
                     <div>
-                      <p className='text-sm text-white/80'>Hóspede</p>
-                      <p className='font-semibold text-white'>{selectedBooking.guest_name}</p>
-                      <p className='text-sm text-white/80'>{selectedBooking.guest_email}</p>
+                      <p className='text-xs text-muted-foreground font-medium uppercase tracking-wider'>Hóspede</p>
+                      <p className='font-semibold text-sm'>{selectedBooking.guest_name}</p>
+                      <p className='text-xs text-muted-foreground truncate'>{selectedBooking.guest_email}</p>
                     </div>
                     <div>
-                      <p className='text-sm text-white/80'>Período</p>
-                      <p className='font-semibold text-white'>{new Date(selectedBooking.check_in).toLocaleDateString('pt-BR')} — {new Date(selectedBooking.check_out).toLocaleDateString('pt-BR')}</p>
+                      <p className='text-xs text-muted-foreground font-medium uppercase tracking-wider'>Período</p>
+                      <p className='font-semibold text-sm'>{new Date(selectedBooking.check_in).toLocaleDateString('pt-BR')} — {new Date(selectedBooking.check_out).toLocaleDateString('pt-BR')}</p>
                     </div>
                   </div>
-                  <div className='max-h-56 overflow-auto space-y-3'>
+                  <div className='h-64 overflow-y-auto space-y-3 p-1'>
                     {messages.map((m) => {
                       const isOwnerMsg = Boolean(m.is_from_owner);
                       const initials = getInitials(isOwnerMsg ? (localStorage.getItem('owner_name') || m.sender_email || 'Você') : (selectedBooking?.guest_name || m.sender_email || 'Hóspede'));
                       return (
                         <div key={m.id} className={`flex items-end gap-2 ${isOwnerMsg ? 'justify-end' : 'justify-start'}`}>
                           {!isOwnerMsg && (
-                            <div className='h-6 w-6 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-[10px] font-bold shadow'>{initials}</div>
+                            <div className='h-7 w-7 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-[10px] font-bold shadow-sm'>{initials}</div>
                           )}
-                          <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm shadow ${isOwnerMsg ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-accent text-accent-foreground rounded-bl-sm'}`}>
-                            <div className='font-medium'>{m.message}</div>
-                            <div className='mt-1 text-[10px] text-white/70 text-right'>{new Date(m.created_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>
+                          <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm shadow-sm ${isOwnerMsg ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-white border border-border text-foreground rounded-bl-sm'}`}>
+                            <div className='font-medium leading-relaxed'>{m.message}</div>
+                            <div className={`mt-1 text-[10px] text-right ${isOwnerMsg ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
                           </div>
                           {isOwnerMsg && (
-                            <div className='h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shadow'>{initials}</div>
+                            <div className='h-7 w-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shadow-sm'>{initials}</div>
                           )}
                         </div>
                       );
                     })}
                     <div ref={messagesEndRef} />
-                    {messages.length === 0 && <div className='text-sm text-muted-foreground'>Sem mensagens</div>}
+                    {messages.length === 0 && <div className='text-center text-sm text-muted-foreground py-8'>Sem mensagens</div>}
                   </div>
-                  <div className='flex gap-2'>
-                    <input className='flex-1 px-3 py-2 rounded border bg-background/40 text-white placeholder-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0 border-white/30' placeholder='Escreva uma mensagem' value={reply} onChange={(e) => setReply(e.target.value)} />
-                    <Button onClick={sendReply}>Enviar</Button>
+                  <div className='flex gap-2 pt-2'>
+                    <input className='flex-1 px-3 py-2 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' placeholder='Escreva uma mensagem...' value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendReply()} />
+                    <Button onClick={sendReply} size='sm'>Enviar</Button>
                   </div>
                 </div>
               )}
