@@ -31,6 +31,7 @@ type Server struct {
     icsLastUpdated time.Time
     stripeSecret string
     stripePublic string
+    email *emailpkg.EmailService
 }
 
 func jsonResp(w http.ResponseWriter, code int, v any) {
@@ -71,6 +72,10 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
     if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"email": body.Email, "is_owner": body.IsOwner, "exp": time.Now().Add(7*24*time.Hour).Unix()})
     str, _ := token.SignedString([]byte(s.jwtSecret))
+    if s.email != nil {
+        link := "https://localhost:3000/verify?email=" + url.QueryEscape(body.Email)
+        _ = s.email.SendAccountConfirmationEmail(body.Email, emailpkg.AccountConfirmationData{ Name: body.FullName, VerificationLink: link })
+    }
     jsonResp(w, 200, map[string]string{"token": str})
 }
 
@@ -265,6 +270,14 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
     if !isOwner { jsonResp(w, 403, map[string]string{"error":"forbidden"}); return }
     id := mux.Vars(r)["id"]
     if _, err := s.pool.Exec(r.Context(), "UPDATE bookings SET status='approved', updated_at=now() WHERE id=$1", id); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    var guestName, guestEmail string
+    var ci, co time.Time
+    var guests int
+    var total float64
+    _ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_name,''), COALESCE(guest_email,''), check_in, check_out, COALESCE(number_of_guests,0), COALESCE(total_price,0)::float8 FROM bookings WHERE id=$1", id).Scan(&guestName, &guestEmail, &ci, &co, &guests, &total)
+    if s.email != nil {
+        _ = s.email.SendBookingAcceptedEmail(guestEmail, emailpkg.BookingEmailData{ Name: guestName, CheckIn: ci.Format("2006-01-02"), CheckOut: co.Format("2006-01-02"), Guests: guests, TotalPrice: total })
+    }
     jsonResp(w, 200, map[string]string{"status":"approved"})
 }
 
@@ -286,6 +299,17 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
     var isOwner bool
     if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     if _, err := s.pool.Exec(r.Context(), "INSERT INTO messages (booking_id, sender_email, is_from_owner, message) VALUES ($1,$2,$3,$4)", body.BookingID, c["email"], isOwner, body.Message); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    if s.email != nil {
+        var userEmail, guestEmail string
+        _ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(user_email,''), COALESCE(guest_email,'') FROM bookings WHERE id=$1", body.BookingID).Scan(&userEmail, &guestEmail)
+        var to string
+        if isOwner { to = userEmail } else {
+            var owner string
+            _ = s.pool.QueryRow(r.Context(), "SELECT email FROM users WHERE is_owner=true ORDER BY created_at ASC LIMIT 1").Scan(&owner)
+            if owner != "" { to = owner } else { to = guestEmail }
+        }
+        _ = s.email.SendChatNotificationEmail(to, emailpkg.ChatMessageEmailData{ SenderName: fmt.Sprintf("%v", c["email"]), Message: body.Message, Timestamp: time.Now().Format(time.RFC3339) })
+    }
     payload, _ := json.Marshal(map[string]any{"type":"message","data": map[string]any{"booking_id": body.BookingID, "sender_email": c["email"], "is_from_owner": isOwner, "message": body.Message, "created_at": time.Now().Format(time.RFC3339)}})
     s.hub.Broadcast(body.BookingID, payload)
     jsonResp(w, 200, map[string]bool{"success": true})
@@ -489,7 +513,7 @@ func main() {
     stripePublic := os.Getenv("STRIPE_PUBLIC_KEY")
     s := &Server{ pool: pool, jwtSecret: secret, hub: NewHub(), stripeSecret: stripeSecret, stripePublic: stripePublic }
     emailClient := emailpkg.NewResendClient()
-    _ = emailClient
+    s.email = emailpkg.NewEmailService(emailClient)
     r := mux.NewRouter()
     r.Use(func(h http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -559,7 +583,7 @@ func main() {
         if key == "" { key = r.URL.Query().Get("api_key") }
         if key == "" { jsonResp(w, 500, map[string]string{"error":"missing_api_key"}); return }
         from := os.Getenv("RESEND_FROM")
-        if from == "" { from = "Casa Pura Vida <onboarding@resend.dev>" }
+        if from == "" { from = "Casa Pura Vida <admin@mbvacationhomes.com.br>" }
         tpl := emailpkg.AccountConfirmationTemplate(emailpkg.AccountConfirmationData{ Name: "Teste", VerificationLink: "https://example.com/verify" })
         payload := map[string]any{ "from": from, "to": to, "subject": "Teste Resend", "html": tpl }
         b, _ := json.Marshal(payload)
@@ -698,6 +722,12 @@ func (s *Server) handleMarkPaid(w http.ResponseWriter, r *http.Request) {
     _ = json.Unmarshal(body, &si)
     if si.Status == "succeeded" {
         _, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET status='paid', paid_at=now(), updated_at=now() WHERE id=$1", id)
+        var guestEmail, guestName string
+        var total float64
+        _ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_email,''), COALESCE(guest_name,''), COALESCE(total_price,0)::float8 FROM bookings WHERE id=$1", id).Scan(&guestEmail, &guestName, &total)
+        if s.email != nil {
+            _ = s.email.SendPaymentConfirmationEmail(guestEmail, emailpkg.PaymentEmailData{ Name: guestName, Amount: total, Date: time.Now().Format(time.RFC3339), ReservationID: id })
+        }
         jsonResp(w, 200, map[string]bool{"paid": true})
         return
     }

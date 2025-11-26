@@ -6,9 +6,5 @@ import (
 )
 
 func NewResendClient() *resend.Client {
-    apiKey := os.Getenv("RESEND_API_KEY")
-    if apiKey == "" {
-        return nil
-    }
-    return resend.NewClient(apiKey)
+    return resend.NewClient(os.Getenv("RESEND_API_KEY"))
 }

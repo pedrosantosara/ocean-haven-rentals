@@ -18,9 +18,10 @@ func (s *EmailService) send(to string, subject string, html string) error {
     if s.client == nil {
         return errors.New("email client not initialized")
     }
-    from := os.Getenv("RESEND_FROM")
+        from := os.Getenv("RESEND_FROM")
     if from == "" {
-        from = "Casa Pura Vida <onboarding@resend.dev>"
+        // OBRIGATÓRIO: email do domínio verificado !!!
+        from = "MB Vacation Homes <contato@mb.vacationhomes.com.br>"
     }
     params := &resend.SendEmailRequest{
         From:    from,
