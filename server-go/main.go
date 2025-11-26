@@ -13,6 +13,7 @@ import (
     "strings"
     "time"
     "fmt"
+    "strconv"
     "github.com/golang-jwt/jwt/v5"
     "github.com/gorilla/mux"
     "github.com/gorilla/websocket"
@@ -334,10 +335,87 @@ func (s *Server) handleDashboardStats(w http.ResponseWriter, r *http.Request) {
     var totalBookings int64
     var approvedBookings int64
     var totalRevenue float64
+    var monthlyRevenue float64
+    var pendingRequests int64
     if err := s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings").Scan(&totalBookings); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     if err := s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings WHERE status='approved'").Scan(&approvedBookings); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    if err := s.pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM bookings WHERE status='requested'").Scan(&pendingRequests); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
     if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(SUM(total_price)::float8, 0) FROM bookings WHERE status='paid'").Scan(&totalRevenue); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
-    jsonResp(w, 200, map[string]any{"total_bookings": totalBookings, "approved_bookings": approvedBookings, "total_revenue": totalRevenue})
+    if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(SUM(total_price)::float8, 0) FROM bookings WHERE status='paid' AND date_trunc('month', paid_at) = date_trunc('month', now())").Scan(&monthlyRevenue); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+    occ := s.computeMonthlyOccupancyRate()
+    jsonResp(w, 200, map[string]any{"total_bookings": totalBookings, "approved_bookings": approvedBookings, "total_revenue": totalRevenue, "monthly_revenue": monthlyRevenue, "pending_requests": pendingRequests, "occupancy_rate": occ})
+}
+
+func (s *Server) computeMonthlyOccupancyRate() float64 {
+    if s.icsCache == "" || time.Since(s.icsLastUpdated) > 10*time.Minute {
+        s.refreshMergedICS(context.Background())
+    }
+    now := time.Now()
+    loc := time.UTC
+    monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+    monthEnd := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, loc)
+    busy := map[string]struct{}{}
+    events := extractEventsFromICS(s.icsCache)
+    for _, block := range events {
+        dtstartLine := findLine(block, "DTSTART")
+        dtendLine := findLine(block, "DTEND")
+        if dtstartLine == "" || dtendLine == "" { continue }
+        st := parseIcsTime(dtstartLine)
+        en := parseIcsTime(dtendLine)
+        if st.IsZero() || en.IsZero() { continue }
+        endExclusive := en.Add(-24 * time.Hour)
+        start := st
+        if start.Before(monthStart) { start = monthStart }
+        if endExclusive.After(monthEnd.Add(-24 * time.Hour)) { endExclusive = monthEnd.Add(-24 * time.Hour) }
+        for cur := start; !cur.After(endExclusive); cur = cur.Add(24 * time.Hour) {
+            key := cur.Format("2006-01-02")
+            busy[key] = struct{}{}
+        }
+    }
+    daysInMonth := int(monthEnd.Sub(monthStart).Hours() / 24)
+    if daysInMonth <= 0 { return 0 }
+    rate := float64(len(busy)) / float64(daysInMonth) * 100.0
+    return mathRound(rate, 0)
+}
+
+func findLine(block, prefix string) string {
+    for _, ln := range strings.Split(block, "\n") {
+        ln = strings.TrimSpace(ln)
+        if strings.HasPrefix(ln, prefix) { return ln }
+    }
+    return ""
+}
+
+func parseIcsTime(line string) time.Time {
+    parts := strings.Split(line, ":")
+    if len(parts) < 2 { return time.Time{} }
+    val := strings.TrimSpace(parts[1])
+    if len(val) == 8 {
+        y, _ := strconv.Atoi(val[0:4])
+        m, _ := strconv.Atoi(val[4:6])
+        d, _ := strconv.Atoi(val[6:8])
+        return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC)
+    }
+    if strings.HasSuffix(val, "Z") && len(val) >= 15 {
+        y, _ := strconv.Atoi(val[0:4])
+        m, _ := strconv.Atoi(val[4:6])
+        d, _ := strconv.Atoi(val[6:8])
+        return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC)
+    }
+    t, _ := time.Parse(time.RFC3339, val)
+    return t
+}
+
+func mathRound(x float64, prec int) float64 {
+    p := mathPow10(prec)
+    if x >= 0 { return float64(int64(x*p+0.5)) / p }
+    return float64(int64(x*p-0.5)) / p
+}
+
+func mathPow10(n int) float64 {
+    v := 1.0
+    for i := 0; i < n; i++ { v *= 10 }
+    return v
 }
 
 func ensureSchema(ctx context.Context, pool *pgxpool.Pool) {

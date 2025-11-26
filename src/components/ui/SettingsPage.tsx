@@ -77,7 +77,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="">
       {/* Header */}
       <div className="bg-white border-b border-zinc-200 px-6 py-4">
         <div>
@@ -98,11 +98,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                     <button
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        activeTab === tab.id
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
                           ? 'bg-zinc-100 text-zinc-900'
                           : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50'
-                      }`}
+                        }`}
                     >
                       <Icon className="w-4 h-4" />
                       {tab.label}
@@ -120,7 +119,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-lg font-semibold text-zinc-900 mb-4">Informações Gerais</h3>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Nome da Propriedade</label>
@@ -131,7 +130,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Tipo de Propriedade</label>
                         <select className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900">
@@ -141,7 +140,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           <option>Pousada</option>
                         </select>
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Endereço</label>
                         <input
@@ -151,7 +150,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Capacidade Máxima</label>
                         <input
@@ -162,10 +161,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                       </div>
                     </div>
                   </div>
-                  
+
                   <div>
                     <h3 className="text-lg font-semibold text-zinc-900 mb-4">Horários de Check-in/Check-out</h3>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Check-in</label>
@@ -176,7 +175,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Check-out</label>
                         <input
@@ -195,7 +194,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-lg font-semibold text-zinc-900 mb-4">Preferências de Notificação</h3>
-                    
+
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <div>
@@ -212,7 +211,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-zinc-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-900"></div>
                         </label>
                       </div>
-                      
+
                       <div className="flex items-center justify-between">
                         <div>
                           <h4 className="text-sm font-medium text-zinc-900">Notificações por SMS</h4>
@@ -228,7 +227,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-zinc-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-900"></div>
                         </label>
                       </div>
-                      
+
                       <div className="flex items-center justify-between">
                         <div>
                           <h4 className="text-sm font-medium text-zinc-900">Notificações Push</h4>
@@ -246,10 +245,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                       </div>
                     </div>
                   </div>
-                  
+
                   <div>
                     <h3 className="text-lg font-semibold text-zinc-900 mb-4">Eventos de Notificação</h3>
-                    
+
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <div>
@@ -266,7 +265,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-zinc-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-900"></div>
                         </label>
                       </div>
-                      
+
                       <div className="flex items-center justify-between">
                         <div>
                           <h4 className="text-sm font-medium text-zinc-900">Cancelamentos</h4>
@@ -282,7 +281,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-zinc-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-900"></div>
                         </label>
                       </div>
-                      
+
                       <div className="flex items-center justify-between">
                         <div>
                           <h4 className="text-sm font-medium text-zinc-900">Falhas de Sincronização</h4>
@@ -298,7 +297,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-zinc-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-900"></div>
                         </label>
                       </div>
-                      
+
                       <div className="flex items-center justify-between">
                         <div>
                           <h4 className="text-sm font-medium text-zinc-900">Baixa Ocupação</h4>
@@ -323,7 +322,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-lg font-semibold text-zinc-900 mb-4">Segurança da Conta</h3>
-                    
+
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Senha Atual</label>
@@ -332,7 +331,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Nova Senha</label>
                         <input
@@ -340,7 +339,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Confirmar Nova Senha</label>
                         <input
@@ -348,16 +347,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <button className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm font-medium hover:bg-zinc-800 transition-colors">
                         Alterar Senha
                       </button>
                     </div>
                   </div>
-                  
+
                   <div>
                     <h3 className="text-lg font-semibold text-zinc-900 mb-4">Autenticação de Dois Fatores</h3>
-                    
+
                     <div className="flex items-center justify-between">
                       <div>
                         <h4 className="text-sm font-medium text-zinc-900">2FA</h4>
@@ -377,7 +376,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-lg font-semibold text-zinc-900 mb-4">Configurações de Preços</h3>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Preço Base (Diária)</label>
@@ -388,7 +387,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Preço Final de Semana</label>
                         <input
@@ -398,7 +397,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Taxa de Limpeza</label>
                         <input
@@ -408,7 +407,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                           className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                         />
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-zinc-700 mb-2">Taxa de Serviço</label>
                         <input
@@ -420,8 +419,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                       </div>
                     </div>
                   </div>
-                  
-                  
+
+
                 </div>
               )}
 

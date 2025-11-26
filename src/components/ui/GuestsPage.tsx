@@ -33,19 +33,19 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
       setLoading(true);
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      
+
       // Load bookings and group by guest
-      const res = await fetch(`${API}/bookings`, { 
-        headers: token ? { Authorization: `Bearer ${token}` } : {} 
+      const res = await fetch(`${API}/bookings`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         const bookings = data.data || [];
-        
+
         // Group by guest email
         const guestMap = new Map();
-        
+
         bookings.forEach((booking: { ID?: string; id?: string; GuestName?: string; guest_name?: string; GuestEmail?: string; guest_email?: string; GuestPhone?: string; guest_phone?: string; TotalPrice?: number; total_price?: number; CheckOut?: string; check_out?: string; Status?: string; status?: string }) => {
           const email = booking.GuestEmail || booking.guest_email;
           const name = booking.GuestName || booking.guest_name;
@@ -53,7 +53,7 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
           const total = booking.TotalPrice || booking.total_price || 0;
           const checkOut = booking.CheckOut || booking.check_out;
           const status = booking.Status || booking.status;
-          
+
           if (guestMap.has(email)) {
             const guest = guestMap.get(email);
             guest.totalBookings += 1;
@@ -74,7 +74,7 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
             });
           }
         });
-        
+
         setGuests(Array.from(guestMap.values()));
       }
     } catch (error) {
@@ -86,7 +86,7 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
 
   const filteredGuests = guests.filter(guest => {
     const matchesSearch = guest.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         guest.email.toLowerCase().includes(searchTerm.toLowerCase());
+      guest.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filterStatus === 'all' || guest.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
@@ -118,7 +118,7 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="">
       {/* Header */}
       <div className="bg-white border-b border-zinc-200 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -130,31 +130,28 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
             <div className="flex bg-zinc-100 rounded-lg p-1">
               <button
                 onClick={() => setFilterStatus('all')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  filterStatus === 'all'
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${filterStatus === 'all'
                     ? 'bg-white text-zinc-900 shadow-sm'
                     : 'text-zinc-600 hover:text-zinc-900'
-                }`}
+                  }`}
               >
                 Todos
               </button>
               <button
                 onClick={() => setFilterStatus('active')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  filterStatus === 'active'
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${filterStatus === 'active'
                     ? 'bg-white text-zinc-900 shadow-sm'
                     : 'text-zinc-600 hover:text-zinc-900'
-                }`}
+                  }`}
               >
                 Ativos
               </button>
               <button
                 onClick={() => setFilterStatus('completed')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  filterStatus === 'completed'
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${filterStatus === 'completed'
                     ? 'bg-white text-zinc-900 shadow-sm'
                     : 'text-zinc-600 hover:text-zinc-900'
-                }`}
+                  }`}
               >
                 Concluídos
               </button>
@@ -220,14 +217,14 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
                     <span className="text-zinc-600">Total de reservas</span>
                     <span className="font-medium text-zinc-900">{guest.totalBookings}</span>
                   </div>
-                  
+
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-zinc-600">Total gasto</span>
                     <span className="font-medium text-zinc-900">
                       R$ {guest.totalSpent.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
-                  
+
                   {guest.lastStay && (
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-zinc-600">Última estadia</span>
@@ -236,8 +233,8 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
                       </span>
                     </div>
                   )}
-                  
-                  
+
+
                 </div>
 
                 {guest.phone && (

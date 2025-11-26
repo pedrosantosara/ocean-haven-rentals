@@ -33,11 +33,11 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
     try {
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      
-      const res = await fetch(`${API}/ical`, { 
-        headers: token ? { Authorization: `Bearer ${token}` } : {} 
+
+      const res = await fetch(`${API}/ical`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         const mapped = (data.data || []).map((s: { id: number; platform: string; url: string; created_at: string; last_sync?: string }) => ({
@@ -50,12 +50,12 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
         }));
         setSyncs(mapped);
       }
-      
+
       // Load last sync time
-      const lastSyncRes = await fetch(`${API}/ical/last-sync`, { 
-        headers: token ? { Authorization: `Bearer ${token}` } : {} 
+      const lastSyncRes = await fetch(`${API}/ical/last-sync`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      
+
       if (lastSyncRes.ok) {
         const data = await lastSyncRes.json();
         setLastUpdated(data.last_updated || '');
@@ -69,12 +69,12 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
 
   const addSync = async () => {
     if (!newPlatform.trim() || !newUrl.trim()) return;
-    
+
     setIsAdding(true);
     try {
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      
+
       const res = await fetch(`${API}/ical`, {
         method: 'POST',
         headers: {
@@ -83,11 +83,11 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
         },
         body: JSON.stringify({ platform: newPlatform, url: newUrl })
       });
-      
+
       if (res.ok) {
         // Sync immediately after adding
         await syncNow(0);
-        
+
         setNewPlatform('');
         setNewUrl('');
         await loadSyncs();
@@ -103,14 +103,14 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
     try {
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      
+
       const res = await fetch(`${API}/ical/${id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`
         }
       });
-      
+
       if (res.ok) {
         await loadSyncs();
       }
@@ -177,7 +177,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="">
       {/* Header */}
       <div className="bg-white border-b border-zinc-200 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -203,7 +203,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
             </button>
           </div>
         </div>
-        
+
         <div className="mt-3 text-sm text-zinc-500">
           {lastUpdated ? (
             <>Última sincronização: {format(new Date(lastUpdated), 'dd/MM/yyyy HH:mm', { locale: ptBR })}</>
@@ -220,7 +220,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
           <div className="lg:col-span-1">
             <div className="bg-white rounded-xl shadow-sm border border-zinc-200 p-6">
               <h3 className="text-lg font-semibold text-zinc-900 mb-4">Adicionar Novo Calendário</h3>
-              
+
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-zinc-700 mb-2">Plataforma</label>
@@ -236,7 +236,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
                     <option value="Outro">Outro</option>
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium text-zinc-700 mb-2">URL do iCal</label>
                   <input
@@ -247,7 +247,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
                     className="w-full px-3 py-2 border border-zinc-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900"
                   />
                 </div>
-                
+
                 <button
                   onClick={addSync}
                   disabled={isAdding || !newPlatform || !newUrl}
@@ -266,7 +266,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
                   )}
                 </button>
               </div>
-              
+
               {/* Quick Links */}
               <div className="mt-6 pt-6 border-t border-zinc-200">
                 <h4 className="text-sm font-medium text-zinc-900 mb-3">Links Rápidos</h4>
@@ -303,7 +303,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
                   {syncs.length} calendário(s) ativo(s)
                 </p>
               </div>
-              
+
               <div className="p-6">
                 {loading ? (
                   <div className="text-center py-8">
@@ -336,16 +336,16 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
                             )}
                           </div>
                         </div>
-                        
+
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-2">
                             <div className={`w-2 h-2 rounded-full ${getStatusColor(sync.status)}`}></div>
                             <span className="text-xs text-zinc-500">
                               {sync.status === 'active' ? 'Ativo' :
-                               sync.status === 'syncing' ? 'Sincronizando' : 'Erro'}
+                                sync.status === 'syncing' ? 'Sincronizando' : 'Erro'}
                             </span>
                           </div>
-                          
+
                           <button
                             onClick={() => syncNow(sync.id)}
                             className="p-2 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-lg transition-colors"
@@ -353,7 +353,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
                           >
                             <RefreshCw className="w-4 h-4" />
                           </button>
-                          
+
                           <button
                             onClick={() => removeSync(sync.id)}
                             className="p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"

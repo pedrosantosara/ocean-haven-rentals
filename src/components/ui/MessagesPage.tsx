@@ -52,11 +52,11 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
       setLoading(true);
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      
-      const res = await fetch(`${API}/bookings`, { 
-        headers: token ? { Authorization: `Bearer ${token}` } : {} 
+
+      const res = await fetch(`${API}/bookings`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         const mapped = (data.data || []).map((b: { ID?: string; id?: string; GuestName?: string; guest_name?: string; GuestEmail?: string; guest_email?: string; CheckIn?: string; check_in?: string; CheckOut?: string; check_out?: string; Status?: string; status?: string; TotalPrice?: number; total_price?: number; NumberOfGuests?: number; number_of_guests?: number }) => ({
@@ -82,11 +82,11 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
     try {
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      
-      const res = await fetch(`${API}/messages?booking_id=${bookingId}`, { 
-        headers: token ? { Authorization: `Bearer ${token}` } : {} 
+
+      const res = await fetch(`${API}/messages?booking_id=${bookingId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         type ApiMessage = { ID?: number; id?: number; BookingID?: string; booking_id?: string; SenderEmail?: string; sender_email?: string; IsFromOwner?: boolean; is_from_owner?: boolean; Message?: string; message?: string; CreatedAt?: string; created_at?: string };
@@ -137,11 +137,11 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
 
   const handleSend = async () => {
     if (!inputText.trim() || !selectedBooking) return;
-    
+
     try {
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      
+
       const res = await fetch(`${API}/messages`, {
         method: 'POST',
         headers: {
@@ -153,7 +153,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
           Message: inputText
         })
       });
-      
+
       if (res.ok) {
         setInputText('');
         loadMessages(selectedBooking.id);
@@ -209,7 +209,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="">
       {/* Header */}
       <div className="bg-white border-b border-zinc-200 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -232,15 +232,14 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
             <h2 className="text-lg font-semibold text-zinc-900">Conversas</h2>
             <p className="text-sm text-zinc-500">{bookings.length} reservas ativas</p>
           </div>
-          
+
           <div className="divide-y divide-zinc-100">
             {bookings.map((booking) => (
               <button
                 key={booking.id}
                 onClick={() => handleSelectBooking(booking)}
-                className={`w-full p-4 text-left hover:bg-zinc-50 transition-colors ${
-                  selectedBooking?.id === booking.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
-                }`}
+                className={`w-full p-4 text-left hover:bg-zinc-50 transition-colors ${selectedBooking?.id === booking.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
+                  }`}
               >
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-600 font-semibold text-sm">
@@ -263,7 +262,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
               </button>
             ))}
           </div>
-          
+
           {bookings.length === 0 && (
             <div className="p-8 text-center">
               <MessageSquare className="w-12 h-12 text-zinc-300 mx-auto mb-4" />
@@ -332,36 +331,34 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                 {messages.map((msg) => {
                   const isHost = msg.is_from_owner;
                   const senderName = isHost ? 'Você' : selectedBooking.guest_name;
-                  
+
                   return (
                     <div key={msg.id} className={`flex ${isHost ? 'justify-end' : 'justify-start'}`}>
                       <div className={`flex gap-3 max-w-[70%] ${isHost ? 'flex-row-reverse' : ''}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold ${
-                          isHost 
-                            ? 'bg-zinc-100 text-zinc-600' 
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-semibold ${isHost
+                            ? 'bg-zinc-100 text-zinc-600'
                             : 'bg-blue-100 text-blue-600'
-                        }`}>
+                          }`}>
                           {isHost ? <User size={14} /> : getInitials(selectedBooking.guest_name)}
                         </div>
                         <div>
-                          <div className={`p-3 rounded-2xl text-sm ${
-                            isHost 
-                              ? 'bg-zinc-900 text-white rounded-tr-none' 
+                          <div className={`p-3 rounded-2xl text-sm ${isHost
+                              ? 'bg-zinc-900 text-white rounded-tr-none'
                               : 'bg-white border border-zinc-200 text-zinc-900 rounded-tl-none shadow-sm'
-                          }`}>
+                            }`}>
                             {msg.message}
                           </div>
-                <div className="flex items-center gap-1 mt-1">
-                  <span className="text-xs text-zinc-500">
-                    {(() => { const d = new Date(msg.created_at); return isNaN(d.getTime()) ? '' : format(d, 'HH:mm', { locale: ptBR }); })()}
-                  </span>
-                  {msg.is_from_owner && (
-                    <span className="text-[10px] text-zinc-400 flex items-center gap-1">
-                      <Bot size={10} />
-                      Você
-                    </span>
-                  )}
-                </div>
+                          <div className="flex items-center gap-1 mt-1">
+                            <span className="text-xs text-zinc-500">
+                              {(() => { const d = new Date(msg.created_at); return isNaN(d.getTime()) ? '' : format(d, 'HH:mm', { locale: ptBR }); })()}
+                            </span>
+                            {msg.is_from_owner && (
+                              <span className="text-[10px] text-zinc-400 flex items-center gap-1">
+                                <Bot size={10} />
+                                Você
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

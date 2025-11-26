@@ -38,17 +38,17 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
       setLoading(true);
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      
+
       // Load reservations
-      const res = await fetch(`${API}/bookings`, { 
-        headers: token ? { Authorization: `Bearer ${token}` } : {} 
+      const res = await fetch(`${API}/bookings`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
-      
+
       // Load calendar events from merged.ics
       const icsRes = await fetch(`${API}/calendar/merged.ics?t=${Date.now()}`);
-      
+
       const allEvents: CalendarEvent[] = [];
-      
+
       if (res.ok) {
         const data = await res.json();
         const reservations = (data.data || []).map((r: { ID?: string; id?: string; GuestName?: string; guest_name?: string; CheckIn?: string; check_in?: string; CheckOut?: string; check_out?: string; Status?: string; status?: string }) => ({
@@ -64,13 +64,13 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
         }));
         allEvents.push(...reservations);
       }
-      
+
       if (icsRes.ok) {
         const icsText = await icsRes.text();
         const icsEvents = parseICSEvents(icsText);
         allEvents.push(...icsEvents);
       }
-      
+
       setEvents(allEvents);
     } catch (error) {
       console.error('Error loading calendar data:', error);
@@ -163,7 +163,7 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
   const month = currentDate.getMonth();
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
-  
+
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const padding = Array.from({ length: firstDay }, (_, i) => i);
 
@@ -185,7 +185,7 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="">
       {/* Header */}
       <div className="bg-white border-b border-zinc-200 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -232,7 +232,7 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
               <ChevronRight className="w-5 h-5" />
             </button>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <button className="px-3 py-1.5 text-sm font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors">
               Hoje
@@ -240,21 +240,19 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
             <div className="flex bg-zinc-100 rounded-lg p-1">
               <button
                 onClick={() => setViewType('month')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  viewType === 'month'
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${viewType === 'month'
                     ? 'bg-white text-zinc-900 shadow-sm'
                     : 'text-zinc-600 hover:text-zinc-900'
-                }`}
+                  }`}
               >
                 Mês
               </button>
               <button
                 onClick={() => setViewType('week')}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  viewType === 'week'
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${viewType === 'week'
                     ? 'bg-white text-zinc-900 shadow-sm'
                     : 'text-zinc-600 hover:text-zinc-900'
-                }`}
+                  }`}
               >
                 Semana
               </button>
@@ -286,15 +284,13 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
             {days.map(day => {
               const dayEvents = getEventsForDate(day);
               const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
-              
+
               return (
-                <div key={day} className={`h-40 md:h-32 border-r border-b border-zinc-100 p-3 md:p-2 relative group hover:bg-zinc-50 transition-colors ${
-                  isToday ? 'bg-blue-50' : ''
-                }`}>
+                <div key={day} className={`h-40 md:h-32 border-r border-b border-zinc-100 p-3 md:p-2 relative group hover:bg-zinc-50 transition-colors ${isToday ? 'bg-blue-50' : ''
+                  }`}>
                   <div className="flex justify-between items-start mb-1">
-                    <span className={`text-base md:text-sm font-medium ${
-                      isToday ? 'text-blue-600 bg-blue-100 w-6 h-6 flex items-center justify-center rounded-full' : 'text-zinc-900'
-                    }`}>
+                    <span className={`text-base md:text-sm font-medium ${isToday ? 'text-blue-600 bg-blue-100 w-6 h-6 flex items-center justify-center rounded-full' : 'text-zinc-900'
+                      }`}>
                       {day}
                     </span>
                     {dayEvents.length > 0 && (
@@ -310,9 +306,9 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
                       <div
                         key={idx}
                         className="px-1.5 py-0.5 text-[11px] md:text-[10px] rounded truncate cursor-pointer hover:opacity-80 transition-opacity"
-                        style={{ 
-                          backgroundColor: event.color + '20', 
-                          color: event.color, 
+                        style={{
+                          backgroundColor: event.color + '20',
+                          color: event.color,
                           borderLeft: `2px solid ${event.color}`
                         }}
                         onClick={() => setSelectedEvent(event)}
@@ -382,43 +378,42 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
                 </svg>
               </button>
             </div>
-            
+
             <div className="space-y-3">
               <div>
                 <label className="text-sm font-medium text-zinc-700">Fonte</label>
                 <p className="text-sm text-zinc-900">{selectedEvent.source}</p>
               </div>
-              
+
               {selectedEvent.guestName && (
                 <div>
                   <label className="text-sm font-medium text-zinc-700">Nome</label>
                   <p className="text-sm text-zinc-900">{selectedEvent.guestName}</p>
                 </div>
               )}
-              
+
               <div>
                 <label className="text-sm font-medium text-zinc-700">Período</label>
                 <p className="text-sm text-zinc-900">
-                  {format(new Date(selectedEvent.startDate), 'dd/MM/yyyy', { locale: ptBR })} - 
+                  {format(new Date(selectedEvent.startDate), 'dd/MM/yyyy', { locale: ptBR })} -
                   {format(new Date(selectedEvent.endDate), 'dd/MM/yyyy', { locale: ptBR })}
                 </p>
               </div>
-              
+
               {selectedEvent.status && (
                 <div>
                   <label className="text-sm font-medium text-zinc-700">Status</label>
-                  <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
-                    selectedEvent.status === 'confirmed' ? 'bg-green-100 text-green-800' :
-                    selectedEvent.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
+                  <span className={`inline-flex px-2 py-1 text-xs rounded-full ${selectedEvent.status === 'confirmed' ? 'bg-green-100 text-green-800' :
+                      selectedEvent.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-red-100 text-red-800'
+                    }`}>
                     {selectedEvent.status === 'confirmed' ? 'Confirmado' :
-                     selectedEvent.status === 'pending' ? 'Pendente' : 'Cancelado'}
+                      selectedEvent.status === 'pending' ? 'Pendente' : 'Cancelado'}
                   </span>
                 </div>
               )}
             </div>
-            
+
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setSelectedEvent(null)}
