@@ -1,11 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { differenceInDays } from "date-fns";
 
@@ -59,6 +58,29 @@ export const BookingCalendar = () => {
   const [guestPhone, setGuestPhone] = useState("");
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Check authentication on mount
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (token) {
+      fetch("http://localhost:3005/auth/me", {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      .then(res => {
+        if (res.ok) return res.json();
+        throw new Error("Not authenticated");
+      })
+      .then(data => {
+        if (data.user) {
+          setIsAuthenticated(true);
+          if (data.user.full_name) setGuestName(data.user.full_name);
+          if (data.user.email) setGuestEmail(data.user.email);
+        }
+      })
+      .catch(() => setIsAuthenticated(false));
+    }
+  }, []);
 
   const pricing = computePricing(checkIn, checkOut);
 
@@ -78,11 +100,12 @@ export const BookingCalendar = () => {
       toast.error("Selecione as datas de check-in e check-out");
       return;
     }
-    if (!guestName.trim() || !guestEmail.trim()) {
+    // Only validate name/email if not authenticated (or if empty even if authenticated, but auth logic should handle it)
+    if (!isAuthenticated && (!guestName.trim() || !guestEmail.trim())) {
       toast.error("Preencha nome e email");
       return;
     }
-    if (!/^\S+@\S+\.\S+$/.test(guestEmail)) {
+    if (!isAuthenticated && !/^\S+@\S+\.\S+$/.test(guestEmail)) {
       toast.error("Email inválido");
       return;
     }
@@ -96,9 +119,13 @@ export const BookingCalendar = () => {
 
     try {
       let created: CreatedBooking | null = null;
+      const token = localStorage.getItem("token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const res = await fetch(`${API}/bookings`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           CheckIn: checkIn.toISOString(),
           CheckOut: checkOut.toISOString(),
@@ -187,28 +214,32 @@ export const BookingCalendar = () => {
               <CardTitle>Informações do Hóspede</CardTitle>
               <CardDescription>Preencha seus dados</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nome Completo</Label>
-                <Input
-                  id="name"
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  placeholder="Seu nome"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={guestEmail}
-                  onChange={(e) => setGuestEmail(e.target.value)}
-                  placeholder="seu@email.com"
-                  required
-                />
-              </div>
+            <CardContent className="space-y-4 p-4">
+              {!isAuthenticated && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Nome Completo</Label>
+                    <Input
+                      id="name"
+                      value={guestName}
+                      onChange={(e) => setGuestName(e.target.value)}
+                      placeholder="Seu nome completo"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={guestEmail}
+                      onChange={(e) => setGuestEmail(e.target.value)}
+                      placeholder="seu@email.com"
+                      required
+                    />
+                  </div>
+                </>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="phone">Telefone</Label>
                 <Input

@@ -32,6 +32,13 @@ const NewDashboardPage = () => {
       }
     })();
   }, [navigate]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('booking_id')) {
+      setActiveSection('messages');
+    }
+  }, []);
+
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userName, setUserName] = useState<string>('');
   const [userRole, setUserRole] = useState<string>('Owner');

@@ -111,6 +111,17 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
   };
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const bid = params.get('booking_id');
+    if (bid && bookings.length > 0 && !selectedBooking) {
+      const found = bookings.find(b => b.id === bid);
+      if (found) {
+        handleSelectBooking(found);
+      }
+    }
+  }, [bookings, selectedBooking]);
+
+  useEffect(() => {
     if (!selectedBooking) return;
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -331,6 +342,9 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                 {messages.map((msg) => {
                   const isHost = msg.is_from_owner;
                   const senderName = isHost ? 'Você' : selectedBooking.guest_name;
+                  let special: any = null;
+                  try { special = JSON.parse(msg.message); } catch {}
+                  const isPaymentInvite = special && special.type === 'payment_invite';
 
                   return (
                     <div key={msg.id} className={`flex ${isHost ? 'justify-end' : 'justify-start'}`}>
@@ -346,7 +360,16 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                               ? 'bg-zinc-900 text-white rounded-tr-none'
                               : 'bg-white border border-zinc-200 text-zinc-900 rounded-tl-none shadow-sm'
                             }`}>
-                            {msg.message}
+                            {isPaymentInvite ? (
+                              <div className="space-y-2">
+                                <div className="font-medium">{String(special.text || '')}</div>
+                                <button className="w-full px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold opacity-90 cursor-not-allowed">
+                                  {String(special.cta || 'Pagar agora')}
+                                </button>
+                              </div>
+                            ) : (
+                              msg.message
+                            )}
                           </div>
                           <div className="flex items-center gap-1 mt-1">
                             <span className="text-xs text-zinc-500">

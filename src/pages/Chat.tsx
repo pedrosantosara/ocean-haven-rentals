@@ -238,13 +238,25 @@ export default function Chat() {
                 {messages.map((m) => {
                   const isOwnerMsg = Boolean(m.is_from_owner);
                   const initials = getInitials(isOwnerMsg ? (localStorage.getItem('owner_name') || m.sender_email || 'Você') : (booking?.guest_name || m.sender_email || 'Hóspede'));
+                  let special: any = null;
+                  try { special = JSON.parse(m.message); } catch {}
+                  const isPaymentInvite = special && special.type === 'payment_invite';
                   return (
                     <div key={m.id} className={`flex items-end gap-2 ${isOwnerMsg ? 'justify-end' : 'justify-start'}`}>
                       {!isOwnerMsg && (
                         <div className='h-6 w-6 sm:h-7 sm:w-7 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-[10px] font-bold shadow'>{initials}</div>
                       )}
                       <div className={`max-w-[85%] sm:max-w-[70%] px-3 py-2 rounded-2xl text-xs sm:text-sm shadow ${isOwnerMsg ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-accent text-accent-foreground rounded-bl-sm'}`}>
-                        <div className='font-medium'>{m.message}</div>
+                        {isPaymentInvite ? (
+                          <div className='space-y-3'>
+                            <div className='font-medium'>{String(special.text || '')}</div>
+                            <Button size='sm' variant='gradient' disabled className='opacity-90 cursor-not-allowed'>
+                              {String(special.cta || 'Pagar agora')}
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className='font-medium'>{m.message}</div>
+                        )}
                         <div className='mt-1 text-[10px] text-white/70 text-right'>{new Date(m.created_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</div>
                       </div>
                       {isOwnerMsg && (

@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import {
   Popover,
@@ -26,7 +26,6 @@ import casaVideo from '@/assets/videos/video-casa.mp4';
 
 export default function MyBooking() {
   const navigate = useNavigate();
-  const location = useLocation();
   type Booking = {
     id: string;
     status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
@@ -47,6 +46,7 @@ export default function MyBooking() {
     created_at: string;
   };
   const [booking, setBooking] = useState<Booking | null>(null);
+  const [allBookings, setAllBookings] = useState<Booking[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -57,6 +57,8 @@ export default function MyBooking() {
   const paymentContainerRef = useRef<HTMLDivElement | null>(null);
   const stripeRef = useRef<any>(null);
   const elementsRef = useRef<any>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const [paymentInvite, setPaymentInvite] = useState<{ pt?: string; bookingId?: string } | null>(null);
 
   const loadStripeScript = async () => {
     if ((window as any).Stripe) return;
@@ -74,9 +76,17 @@ export default function MyBooking() {
     if (booking.status !== 'confirmed') { toast.error('A reserva precisa ser aceita antes do pagamento'); return; }
     try {
       const token = localStorage.getItem('token');
-      if (!token) { toast.error('Faça login'); return; }
       const API = 'http://localhost:3005';
-      const r = await fetch(`${API}/bookings/${booking.id}/payment-intent`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const params = new URLSearchParams(window.location.search);
+      const pt = params.get('pt');
+      let url = `${API}/bookings/${booking.id}/payment-intent`;
+      let headers: any = {};
+      if (pt) { url += `?pt=${encodeURIComponent(pt)}`; }
+      else {
+        if (!token) { toast.error('Faça login'); return; }
+        headers.Authorization = `Bearer ${token}`;
+      }
+      const r = await fetch(url, { method: 'POST', headers });
       if (!r.ok) { toast.error('Falha ao iniciar pagamento'); return; }
       const j = await r.json();
       setPublishableKey(String(j.publishable_key || ''));
@@ -121,10 +131,34 @@ export default function MyBooking() {
     const token = localStorage.getItem('token');
     if (!token) { setLoading(false); return; }
     const API = 'http://localhost:3005';
+    const meRes = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+    if (meRes.ok) {
+      const me = await meRes.json();
+      if (me.is_owner) { navigate('/dashboard'); return; }
+    }
     const res = await fetch(`${API}/bookings/mine`, { headers: { Authorization: `Bearer ${token}` } });
     if (res.ok) {
       const j = await res.json();
-      const rows = (j.data || []) as unknown[];
+      const rows = (j.data || []) as any[];
+      const mapped: Booking[] = rows.map((raw) => ({
+        id: String(raw.ID ?? raw.id ?? ''),
+        status: ((): Booking['status'] => {
+          switch (raw.Status ?? raw.status) {
+            case 'approved': return 'confirmed';
+            case 'rejected': return 'cancelled';
+            case 'requested': return 'pending';
+            case 'paid': return 'completed';
+            default: return 'pending';
+          }
+        })(),
+        check_in: String(raw.CheckIn ?? raw.check_in ?? ''),
+        check_out: String(raw.CheckOut ?? raw.check_out ?? ''),
+        number_of_guests: Number(raw.NumberOfGuests ?? raw.number_of_guests ?? 0),
+        subtotal_price: Number(raw.SubtotalPrice ?? raw.subtotal_price ?? 0),
+        discount_amount: Number(raw.DiscountAmount ?? raw.discount_amount ?? 0),
+        total_price: Number(raw.TotalPrice ?? raw.total_price ?? 0),
+      }));
+      setAllBookings(mapped);
       const raw = rows[0] as Record<string, unknown> | undefined;
       if (raw) {
         const mapStatus = (s: unknown): Booking['status'] => {
@@ -153,14 +187,70 @@ export default function MyBooking() {
   }, []);
 
   useEffect(() => {
-    const stateBooking = (location.state as LocationState)?.booking;
-    if (stateBooking) {
-      setBooking(stateBooking as Booking);
-      setLoading(false);
-      return;
-    }
     loadBookingAndMessages();
-  }, [loadBookingAndMessages, location.state]);
+  }, [loadBookingAndMessages]);
+
+  useEffect(() => {
+    if (!booking) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const wsUrl = `ws://localhost:3005/ws/messages?booking_id=${booking.id}&token=${token}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => console.log('Connected to chat WS');
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'message' && data.data) {
+          const d = data.data;
+          setMessages((prev) => {
+            const exists = prev.some(
+              (m) => m.created_at === d.created_at && m.message === d.message
+            );
+            if (exists) return prev;
+            return [
+              ...prev,
+              {
+                id: `ws-${Date.now()}`,
+                booking_id: d.booking_id,
+                sender_id: d.sender_email,
+                message: d.message,
+                is_from_owner: d.is_from_owner,
+                created_at: d.created_at,
+              },
+            ];
+          });
+        }
+      } catch (e) {
+        console.error('WS error', e);
+      }
+    };
+
+    return () => ws.close();
+  }, [booking?.id]);
+
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pt = params.get('pt') || undefined;
+    const bid = params.get('bookingId') || undefined;
+    if (pt && bid) {
+      setPaymentInvite({ pt, bookingId: bid });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!paymentInvite || !booking) return;
+    if (paymentInvite.bookingId !== booking.id) return;
+    if (booking.status !== 'confirmed') return;
+    handlePay();
+  }, [paymentInvite, booking]);
 
   const loadMessages = async (bookingId: string) => {
     const token = localStorage.getItem('token');
@@ -243,9 +333,12 @@ export default function MyBooking() {
 
       <div className='pt-24 pb-12 px-4'>
         <div className='container mx-auto max-w-4xl'>
-          <h1 className='text-5xl font-bold mb-12 text-gradient'>
-            Minha Reserva
-          </h1>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">Minhas Reservas</h1>
+              <p className="text-sm text-zinc-500 mt-1">Acompanhe suas reservas atuais e passadas.</p>
+            </div>
+          </div>
 
           <Card className='glass-ocean border-primary/20 mb-8'>
             <CardHeader>
@@ -365,7 +458,7 @@ export default function MyBooking() {
                               </span>
                             </div>
                             <Button
-                              onClick={handlePay}
+                              onClick={() => booking && handlePay(booking)}
                               className='w-full shadow-ocean mx-auto'
                               variant='gradient'
                             >
@@ -388,62 +481,107 @@ export default function MyBooking() {
             </CardContent>
           </Card>
 
-          <Card className='glass-ocean border-primary/20'>
+          <Card className='bg-white border border-zinc-200 rounded-xl shadow-sm'>
             <CardHeader>
               <CardTitle>Mensagens</CardTitle>
-              <CardDescription>
-                Entre em contato conosco sobre sua reserva
-              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className='space-y-4 mb-4 max-h-96 overflow-y-auto'>
+              <div ref={messagesContainerRef} className='space-y-4 mb-4 max-h-96 overflow-y-auto'>
                 {messages.length === 0 ? (
                   <p className='text-center text-muted-foreground py-8'>
                     Nenhuma mensagem ainda. Envie uma mensagem se tiver alguma
                     dúvida!
                   </p>
                 ) : (
-                  messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`p-4 rounded-lg ${
-                        msg.is_from_owner ? 'bg-primary/10' : 'bg-accent/10'
-                      }`}
-                    >
-                      <p className='font-bold text-sm mb-1'>
-                        {msg.is_from_owner ? 'Proprietário' : 'Você'}
-                      </p>
-                      <p>{msg.message}</p>
-                      <p className='text-xs text-muted-foreground mt-2'>
-                        {format(
-                          new Date(msg.created_at),
-                          "dd/MM/yyyy 'às' HH:mm",
-                          {
-                            locale: ptBR,
-                          }
+                  messages.map((msg) => {
+                    let special: any = null;
+                    try { special = JSON.parse(msg.message); } catch {}
+                    const isPayment = special && special.type === 'payment_invite';
+                    const isOwnerMsg = Boolean(msg.is_from_owner);
+                    return (
+                      <div key={msg.id} className={`flex items-end gap-2 ${isOwnerMsg ? 'justify-end' : 'justify-start'}`}>
+                        {!isOwnerMsg && (
+                          <div className='h-6 w-6 sm:h-7 sm:w-7 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-[10px] font-bold shadow'>H</div>
                         )}
-                      </p>
-                    </div>
-                  ))
+                        <div className={`max-w-[85%] sm:max-w-[70%] px-3 py-2 rounded-2xl text-xs sm:text-sm shadow ${isOwnerMsg ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-accent text-accent-foreground rounded-bl-sm'}`}>
+                          {isPayment ? (
+                            <div className='space-y-3'>
+                              <div className='font-medium'>{String(special.text || '')}</div>
+                              <Button onClick={handlePay} className='w-full' variant='gradient'>
+                                {String(special.cta || 'Pagar agora')}
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className='font-medium'>{msg.message}</div>
+                          )}
+                          <div className='mt-1 text-[10px] text-white/70 text-right'>
+                            {new Date(msg.created_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
+                          </div>
+                        </div>
+                        {isOwnerMsg && (
+                          <div className='h-6 w-6 sm:h-7 sm:w-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shadow'>P</div>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
 
               <div className='flex gap-2'>
-                <Textarea
-                  placeholder='Digite sua mensagem...'
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  rows={3}
-                />
-                <Button onClick={sendMessage} className='bg-gradient-ocean'>
+              <Textarea
+                placeholder='Digite sua mensagem...'
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                rows={3}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+              />
+                <Button onClick={sendMessage}>
                   <Send className='h-4 w-4' />
                 </Button>
               </div>
             </CardContent>
           </Card>
+
+          <div className='mt-8 bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden'>
+            <div className='p-4 border-b border-zinc-200'>
+              <h2 className='font-medium text-zinc-900'>Reservas Passadas</h2>
+            </div>
+            <div className='p-6 space-y-4'>
+              {allBookings.filter(b => new Date(b.check_out) < new Date()).map((b) => (
+                <div key={b.id} className='p-4 border border-zinc-200 rounded-lg'>
+                  <div className='flex items-center justify-between'>
+                    <div className='font-medium text-zinc-900'>Reserva #{b.id.slice(0,8)}</div>
+                    {getStatusBadge(b.status)}
+                  </div>
+                  <div className='grid grid-cols-2 gap-3 mt-3 text-sm'>
+                    <div>
+                      <div className='text-zinc-500'>Check-in</div>
+                      <div className='font-medium'>{format(new Date(b.check_in), 'dd MMM yyyy', { locale: ptBR })}</div>
+                    </div>
+                    <div>
+                      <div className='text-zinc-500'>Check-out</div>
+                      <div className='font-medium'>{format(new Date(b.check_out), 'dd MMM yyyy', { locale: ptBR })}</div>
+                    </div>
+                    <div>
+                      <div className='text-zinc-500'>Hóspedes</div>
+                      <div className='font-medium'>{b.number_of_guests}</div>
+                    </div>
+                    <div>
+                      <div className='text-zinc-500'>Total</div>
+                      <div className='font-medium'>R$ {Number(b.total_price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
-      <Footer />
     </div>
   );
 }

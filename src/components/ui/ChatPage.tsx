@@ -281,7 +281,10 @@ export const ChatPage: React.FC<ChatPageProps> = ({ bookingId, onNavClick }) => 
           {messages.map((msg) => {
             const isHost = msg.is_from_owner;
             const senderName = isHost ? 'Você' : booking.guest_name;
-            
+            let special: any = null;
+            try { special = JSON.parse(msg.message); } catch {}
+            const isPaymentInvite = special && special.type === 'payment_invite';
+
             return (
               <div key={msg.id} className={`flex ${isHost ? 'justify-end' : 'justify-start'}`}>
                 <div className={`flex gap-3 max-w-[70%] ${isHost ? 'flex-row-reverse' : ''}`}>
@@ -298,7 +301,16 @@ export const ChatPage: React.FC<ChatPageProps> = ({ bookingId, onNavClick }) => 
                         ? 'bg-zinc-900 text-white rounded-tr-none' 
                         : 'bg-white border border-zinc-200 text-zinc-900 rounded-tl-none shadow-sm'
                     }`}>
-                      {msg.message}
+                      {isPaymentInvite ? (
+                        <div className="space-y-2">
+                          <div className="font-medium">{String(special.text || '')}</div>
+                          <button className="w-full px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold opacity-90 cursor-not-allowed">
+                            {String(special.cta || 'Pagar agora')}
+                          </button>
+                        </div>
+                      ) : (
+                        msg.message
+                      )}
                     </div>
                     <div className="flex items-center gap-1 mt-1">
                       <span className="text-xs text-zinc-500">
