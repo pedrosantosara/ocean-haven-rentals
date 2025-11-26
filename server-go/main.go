@@ -499,7 +499,7 @@ func (s *Server) handleWSMessages(w http.ResponseWriter, r *http.Request) {
 func main() {
     _ = godotenv.Load()
     dsn := os.Getenv("PG_DSN")
-    if dsn == "" { dsn = "postgres://postgres:12345678@localhost:5432/mb-vacations?sslmode=disable" }
+    if dsn == "" { log.Fatal("PG_DSN não definido no .env") }
     secret := os.Getenv("JWT_SECRET")
     if secret == "" { secret = "dev-secret" }
     cfg, _ := pgxpool.ParseConfig(dsn)
@@ -579,22 +579,15 @@ func main() {
     r.HandleFunc("/test/send-email", func(w http.ResponseWriter, r *http.Request) {
         to := r.URL.Query().Get("to")
         if to == "" { jsonResp(w, 400, map[string]string{"error":"missing_to"}); return }
-        key := os.Getenv("RESEND_API_KEY")
-        if key == "" { key = r.URL.Query().Get("api_key") }
-        if key == "" { jsonResp(w, 500, map[string]string{"error":"missing_api_key"}); return }
-        from := os.Getenv("RESEND_FROM")
-        if from == "" { from = "Casa Pura Vida <admin@mbvacationhomes.com.br>" }
-        tpl := emailpkg.AccountConfirmationTemplate(emailpkg.AccountConfirmationData{ Name: "Teste", VerificationLink: "https://example.com/verify" })
-        payload := map[string]any{ "from": from, "to": to, "subject": "Teste Resend", "html": tpl }
-        b, _ := json.Marshal(payload)
-        req, _ := http.NewRequest("POST", "https://api.resend.com/emails", strings.NewReader(string(b)))
-        req.Header.Set("Authorization", "Bearer "+key)
-        req.Header.Set("Content-Type", "application/json")
-        resp, err := http.DefaultClient.Do(req)
-        if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
-        defer resp.Body.Close()
-        rb, _ := io.ReadAll(resp.Body)
-        if resp.StatusCode >= 300 { jsonResp(w, resp.StatusCode, map[string]any{"error":"resend_error","body": string(rb)}); return }
+        subject := r.URL.Query().Get("subject")
+        if subject == "" { subject = "Teste Resend" }
+        html := r.URL.Query().Get("html")
+        text := r.URL.Query().Get("text")
+        if html == "" && text == "" {
+            html = emailpkg.AccountConfirmationTemplate(emailpkg.AccountConfirmationData{ Name: "Teste", VerificationLink: "https://example.com/verify" })
+        }
+        if s.email == nil { jsonResp(w, 500, map[string]string{"error":"missing_api_key"}); return }
+        if err := s.email.SendRawEmail(to, subject, html, text); err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
         jsonResp(w, 200, map[string]bool{"sent": true})
     }).Methods("GET")
     r.HandleFunc("/settings/public", s.handleGetSettingsPublic).Methods("GET")

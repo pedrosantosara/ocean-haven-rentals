@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Gallery from "./pages/Gallery";
 import Dashboard from "./pages/Dashboard";
+import NewDashboardPage from "./pages/NewDashboard";
 import MyBooking from "./pages/MyBooking";
 import NotFound from "./pages/NotFound";
 import Chat from "./pages/Chat";
@@ -24,6 +25,7 @@ const App = () => (
           <Route path="/auth" element={<Auth />} />
           <Route path="/gallery" element={<Gallery />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/new-dashboard" element={<NewDashboardPage />} />
           <Route path="/chat/:bookingId" element={<Chat />} />
           <Route path="/my-booking" element={<MyBooking />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

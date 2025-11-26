@@ -52,3 +52,18 @@ func (s *EmailService) SendBookingAcceptedEmail(to string, data BookingEmailData
 func (s *EmailService) SendChatNotificationEmail(to string, data ChatMessageEmailData) error {
     return s.send(to, "Nova mensagem no chat", ChatNotificationTemplate(data))
 }
+
+func (s *EmailService) SendRawEmail(to, subject, html, text string) error {
+    if s.client == nil {
+        return errors.New("email client not initialized")
+    }
+    from := os.Getenv("RESEND_FROM")
+    if from == "" {
+        from = "admin@mbvacationhomes.com.br"
+    }
+    params := &resend.SendEmailRequest{ From: from, To: []string{to}, Subject: subject }
+    if html != "" { params.Html = html }
+    if text != "" { params.Text = text }
+    _, err := s.client.Emails.Send(params)
+    return err
+}
