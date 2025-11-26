@@ -28,6 +28,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+type ctxKey string
+
+const userCtxKey ctxKey = "user"
+
 type Server struct {
 	pool           *pgxpool.Pool
 	jwtSecret      string
@@ -64,7 +68,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			jsonResp(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
 			return
 		}
-		ctx := context.WithValue(r.Context(), "user", claims)
+		ctx := context.WithValue(r.Context(), userCtxKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -122,7 +126,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func getClaims(r *http.Request) jwt.MapClaims {
-	v := r.Context().Value("user")
+	v := r.Context().Value(userCtxKey)
 	if v == nil {
 		return jwt.MapClaims{}
 	}
@@ -222,16 +226,17 @@ func (s *Server) refreshMergedICS(ctx context.Context) {
 	for rows.Next() {
 		var rid int64
 		var platform, u string
-		if err := rows.Scan(&rid, &platform, &u); err != nil {
+		if err = rows.Scan(&rid, &platform, &u); err != nil {
 			return
 		}
-		resp, err := http.Get(u)
-		if err != nil {
+		resp, err2 := http.Get(u)
+		if err2 != nil {
 			continue
 		}
-		body, err := io.ReadAll(resp.Body)
+
+		body, err2 := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if err != nil {
+		if err2 != nil {
 			continue
 		}
 		evs := extractEventsFromICSWithCategory(string(body), platform)
@@ -246,7 +251,7 @@ func (s *Server) refreshMergedICS(ctx context.Context) {
 		var id int64
 		var from, to time.Time
 		var note string
-		if err := bl.Scan(&id, &from, &to, &note); err != nil {
+		if err = bl.Scan(&id, &from, &to, &note); err != nil {
 			return
 		}
 		var sb strings.Builder
@@ -280,6 +285,7 @@ func (s *Server) refreshMergedICS(ctx context.Context) {
 		}
 		var sb strings.Builder
 		sb.WriteString("BEGIN:VEVENT\n")
+
 		sb.WriteString("UID:" + id + "\n")
 		sb.WriteString("SUMMARY:Reserva " + guest + "\n")
 		sb.WriteString("CATEGORIES:Site\n")

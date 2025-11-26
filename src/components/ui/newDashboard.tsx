@@ -215,10 +215,6 @@ export const NewDashboard: React.FC = () => {
             <Plus className="w-4 h-4" />
             Nova Reserva Manual
           </button>
-          <button className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white border border-zinc-200 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all shadow-sm" onClick={handleLogout}>
-            <LogOut className="w-4 h-4" />
-            Sair
-          </button>
         </div>
       </div>
 

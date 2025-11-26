@@ -197,17 +197,17 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredGuests.map((guest) => (
               <div key={guest.id} className="bg-white rounded-xl shadow-sm border border-zinc-200 p-6 hover:shadow-md transition-shadow">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-600 font-semibold text-lg">
-                      {guest.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                <div className="flex items-start justify-between gap-2 mb-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-600 font-semibold text-lg shrink-0">
+                      {guest.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-zinc-900">{guest.name}</h3>
-                      <p className="text-sm text-zinc-500">{guest.email}</p>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-zinc-900 truncate">{guest.name}</h3>
+                      <p className="text-sm text-zinc-500 truncate">{guest.email}</p>
                     </div>
                   </div>
-                  <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(guest.status)}`}>
+                  <span className={`px-2 py-1 text-xs rounded-full shrink-0 ${getStatusColor(guest.status)}`}>
                     {getStatusLabel(guest.status)}
                   </span>
                 </div>

@@ -185,14 +185,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
             <h1 className="text-2xl font-semibold text-zinc-900">Sincronização de Calendários</h1>
             <p className="text-sm text-zinc-500 mt-1">Gerencie suas integrações com plataformas externas</p>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={copyICalLink}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-zinc-200 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all shadow-sm"
-            >
-              <Link className="w-4 h-4" />
-              Copiar Link iCal
-            </button>
+          <div className="flex flex-col md:flex-row items-end md:items-center gap-2">
             <button
               onClick={() => syncNow(0)}
               disabled={isSyncing}
@@ -200,6 +193,13 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
             >
               {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               {isSyncing ? 'Sincronizando...' : 'Sincronizar Agora'}
+            </button>
+            <button
+              onClick={copyICalLink}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-zinc-200 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all shadow-sm"
+            >
+              <Link className="w-4 h-4" />
+              Copiar Link iCal
             </button>
           </div>
         </div>
