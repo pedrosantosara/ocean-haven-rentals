@@ -1,19 +1,40 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NewDashboard } from '@/components/ui/newDashboard';
 import { CalendarPage } from '@/components/ui/CalendarPage';
 import { MessagesPage } from '@/components/ui/MessagesPage';
 import { SyncPage } from '@/components/ui/SyncPage';
 import { GuestsPage } from '@/components/ui/GuestsPage';
 import { SettingsPage } from '@/components/ui/SettingsPage';
+import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, CalendarDays, MessageSquare, Users, RefreshCw, Settings, User } from 'lucide-react';
 
 const NewDashboardPage = () => {
   const [activeSection, setActiveSection] = useState('dashboard');
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const navigate = useNavigate();
+  const [isOwner, setIsOwner] = useState<boolean | null>(null);
 
-  // Mock user data - in a real app this would come from context or props
-  const userName = "João Silva";
-  const userRole = "Superhost";
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) { navigate('/auth'); return; }
+        const API = 'http://localhost:3005';
+        const r = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+        const j = await r.json();
+        const owner = Boolean(j.user?.is_owner);
+        const fullName = String(j.user?.full_name || j.user?.email || '');
+        setUserName(fullName);
+        setUserRole(owner ? 'Owner' : 'Guest');
+        setIsOwner(owner);
+        if (!owner) { navigate('/my-booking'); }
+      } catch {
+        // ignore
+      }
+    })();
+  }, [navigate]);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [userName, setUserName] = useState<string>('');
+  const [userRole, setUserRole] = useState<string>('Owner');
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -48,6 +69,7 @@ const NewDashboardPage = () => {
     }
   };
 
+  if (isOwner !== true) { return null; }
   return (
     <div className="flex h-screen bg-zinc-50 text-zinc-900 antialiased">
       {/* Sidebar Navigation */}
@@ -89,7 +111,7 @@ const NewDashboardPage = () => {
               <p className="text-sm font-medium truncate">{userName}</p>
               <p className="text-xs text-zinc-500 truncate">{userRole}</p>
             </div>
-            <button className="text-zinc-400 hover:text-zinc-900">
+            <button className="text-zinc-400 hover:text-zinc-900" onClick={() => { localStorage.removeItem('token'); navigate('/auth'); }}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>

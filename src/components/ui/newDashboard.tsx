@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarDays, Link, Plus, TrendingUp, Home, Bell, ChevronLeft, ChevronRight, Send, User } from 'lucide-react';
+import { CalendarDays, Link, Plus, TrendingUp, Home, Bell, ChevronLeft, ChevronRight, Send, User, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface Reservation {
   id: string;
@@ -39,6 +40,8 @@ export const NewDashboard: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [basePrice, setBasePrice] = useState(500);
   const [weekendPrice, setWeekendPrice] = useState(600);
+  const navigate = useNavigate();
+  const handleLogout = () => { localStorage.removeItem('token'); navigate('/auth'); };
 
   const monthNames = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -211,6 +214,10 @@ export const NewDashboard: React.FC = () => {
           <button className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-zinc-900 text-white rounded-md text-sm font-medium hover:bg-zinc-800 transition-all shadow-sm hover:shadow-md" onClick={() => setManualOpen(true)}>
             <Plus className="w-4 h-4" />
             Nova Reserva Manual
+          </button>
+          <button className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white border border-zinc-200 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all shadow-sm" onClick={handleLogout}>
+            <LogOut className="w-4 h-4" />
+            Sair
           </button>
         </div>
       </div>
