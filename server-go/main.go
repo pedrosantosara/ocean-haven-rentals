@@ -20,6 +20,7 @@ import (
     "github.com/jackc/pgx/v5/pgxpool"
     "github.com/joho/godotenv"
     "golang.org/x/crypto/bcrypt"
+    emailpkg "ocean-haven-rentals/internal/email"
 )
 
 type Server struct {
@@ -487,6 +488,8 @@ func main() {
     stripeSecret := os.Getenv("STRIPE_SECRET_KEY")
     stripePublic := os.Getenv("STRIPE_PUBLIC_KEY")
     s := &Server{ pool: pool, jwtSecret: secret, hub: NewHub(), stripeSecret: stripeSecret, stripePublic: stripePublic }
+    emailClient := emailpkg.NewResendClient()
+    _ = emailClient
     r := mux.NewRouter()
     r.Use(func(h http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -548,6 +551,28 @@ func main() {
     r.Handle("/blocks", s.authMiddleware(http.HandlerFunc(s.handleListBlocks))).Methods("GET")
     r.Handle("/blocks/unblock", s.authMiddleware(http.HandlerFunc(s.handleUnblockRange))).Methods("POST")
     r.HandleFunc("/calendar/merged.ics", s.handleMergedICS).Methods("GET")
+    r.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods("GET")
+    r.HandleFunc("/test/send-email", func(w http.ResponseWriter, r *http.Request) {
+        to := r.URL.Query().Get("to")
+        if to == "" { jsonResp(w, 400, map[string]string{"error":"missing_to"}); return }
+        key := os.Getenv("RESEND_API_KEY")
+        if key == "" { key = r.URL.Query().Get("api_key") }
+        if key == "" { jsonResp(w, 500, map[string]string{"error":"missing_api_key"}); return }
+        from := os.Getenv("RESEND_FROM")
+        if from == "" { from = "Casa Pura Vida <onboarding@resend.dev>" }
+        tpl := emailpkg.AccountConfirmationTemplate(emailpkg.AccountConfirmationData{ Name: "Teste", VerificationLink: "https://example.com/verify" })
+        payload := map[string]any{ "from": from, "to": to, "subject": "Teste Resend", "html": tpl }
+        b, _ := json.Marshal(payload)
+        req, _ := http.NewRequest("POST", "https://api.resend.com/emails", strings.NewReader(string(b)))
+        req.Header.Set("Authorization", "Bearer "+key)
+        req.Header.Set("Content-Type", "application/json")
+        resp, err := http.DefaultClient.Do(req)
+        if err != nil { jsonResp(w, 500, map[string]string{"error": err.Error()}); return }
+        defer resp.Body.Close()
+        rb, _ := io.ReadAll(resp.Body)
+        if resp.StatusCode >= 300 { jsonResp(w, resp.StatusCode, map[string]any{"error":"resend_error","body": string(rb)}); return }
+        jsonResp(w, 200, map[string]bool{"sent": true})
+    }).Methods("GET")
     r.HandleFunc("/settings/public", s.handleGetSettingsPublic).Methods("GET")
     r.HandleFunc("/bookings", s.handleCreateBooking).Methods("POST")
     r.Handle("/bookings", s.authMiddleware(http.HandlerFunc(s.handleListBookingsOwner))).Methods("GET")

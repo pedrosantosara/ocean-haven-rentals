@@ -26,9 +26,19 @@ export function ICalSync() {
   const loadSyncs = async () => {
     const token = localStorage.getItem("token");
     const API = "http://localhost:3005";
-    const res = await fetch(`${API}/ical`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) { toast.error("Erro ao carregar sincronizações"); }
-    else { const j = await res.json(); setSyncs(j.data || []); }
+    if (!token) {
+      setLoading(false);
+      toast.error("Faça login para ver as sincronizações iCal");
+      return;
+    }
+    const res = await fetch(`${API}/ical`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      toast.error(txt || "Erro ao carregar sincronizações");
+    } else {
+      const j = await res.json();
+      setSyncs(j.data || []);
+    }
     setLoading(false);
   };
 
