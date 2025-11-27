@@ -34,6 +34,7 @@ export const BookingCalendar = () => {
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [loading, setLoading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [monthsCount, setMonthsCount] = useState(1);
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
 
@@ -57,6 +58,10 @@ export const BookingCalendar = () => {
       })
       .catch(() => setIsAuthenticated(false));
     }
+    const updateMonths = () => setMonthsCount(window.innerWidth >= 768 ? 2 : 1);
+    updateMonths();
+    window.addEventListener("resize", updateMonths);
+    return () => window.removeEventListener("resize", updateMonths);
   }, []);
 
   useEffect(() => {
@@ -202,7 +207,7 @@ export const BookingCalendar = () => {
               <CardTitle>Selecione as Datas</CardTitle>
               <CardDescription>Escolha check-in e check-out</CardDescription>
             </CardHeader>
-            <CardContent className="p-4">
+            <CardContent className="p-4 overflow-x-hidden">
               <Calendar
                 mode="range"
                 selected={{ from: checkIn, to: checkOut }}
@@ -212,15 +217,18 @@ export const BookingCalendar = () => {
                 }}
                 disabled={(date) => date < new Date()}
                 showOutsideDays
-                numberOfMonths={2}
-                className="w-full"
+                numberOfMonths={monthsCount}
+                className="w-full max-w-full"
                 classNames={{
-                  months: "grid grid-cols-1 md:grid-cols-2 gap-4 w-full",
-                  month: "space-y-4",
+                  months: "flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full",
+                  month: "space-y-3",
+                  table: "w-full border-collapse",
+                  head_row: "grid grid-cols-7",
                   caption_label: "text-base md:text-lg font-semibold",
-                  head_cell: "text-muted-foreground rounded-md w-9 sm:w-10 md:w-12 font-normal text-[0.8rem]",
-                  cell: "h-9 w-9 sm:h-10 sm:w-10 md:h-12 md:w-12 text-center text-sm p-0 relative",
-                  day: "h-9 w-9 sm:h-10 sm:w-10 md:h-12 md:w-12 p-0 font-normal",
+                  head_cell: "text-muted-foreground truncate font-normal text-[0.75rem] md:text-[0.8rem]",
+                  row: "grid grid-cols-7 w-full mt-2",
+                  cell: "aspect-square w-full text-center text-xs md:text-sm p-0 relative",
+                  day: "w-full h-full p-0 font-normal",
                 }}
               />
             </CardContent>
