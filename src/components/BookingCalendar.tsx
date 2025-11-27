@@ -6,48 +6,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { differenceInDays } from "date-fns";
+import { differenceInDays, format } from "date-fns";
 
-const BASE_PRICE = 5000;
-const WEEKEND_PRICE = 6000;
-const WEEKEND_DAYS = new Set([5, 6]);
+const formatBRL = (n: number | null | undefined) => (typeof n === "number" && isFinite(n) ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n) : "");
 
-function computePricing(checkIn?: Date, checkOut?: Date) {
-  if (!checkIn || !checkOut) {
-    return {
-      nights: 0,
-      weekdayNights: 0,
-      weekendNights: 0,
-      subtotal: 0,
-      discountPercent: 0,
-      discountAmount: 0,
-      total: 0,
-    };
-  }
-  const nights = differenceInDays(checkOut, checkIn);
-  let weekendNights = 0;
-  let weekdayNights = 0;
-  let subtotal = 0;
-  for (let i = 0; i < nights; i++) {
-    const d = new Date(checkIn);
-    d.setDate(d.getDate() + i);
-    const dow = d.getDay();
-    const isWeekend = WEEKEND_DAYS.has(dow);
-    if (isWeekend) {
-      weekendNights++;
-      subtotal += WEEKEND_PRICE;
-    } else {
-      weekdayNights++;
-      subtotal += BASE_PRICE;
-    }
-  }
-  const discountPercent = nights >= 28 ? 0.05 : nights >= 7 ? 0.03 : 0;
-  const discountAmount = subtotal * discountPercent;
-  const total = Math.round(subtotal - discountAmount);
-  return { nights, weekdayNights, weekendNights, subtotal, discountPercent, discountAmount, total };
+interface Pricing {
+  subtotal: number;
+  discount_amount: number;
+  cleaning_fee: number;
+  service_fee: number;
+  total: number;
+  nights: number;
+  weekday_nights: number;
+  weekend_nights: number;
+  base_price: number;
+  weekend_price: number;
+  price_buckets?: { price: number; count: number }[];
 }
-
-const formatBRL = (n: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 
 export const BookingCalendar = () => {
   const navigate = useNavigate();
@@ -59,6 +34,8 @@ export const BookingCalendar = () => {
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [loading, setLoading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [pricing, setPricing] = useState<Pricing | null>(null);
+  const [calculatingPrice, setCalculatingPrice] = useState(false);
 
   // Check authentication on mount
   useEffect(() => {
@@ -82,7 +59,41 @@ export const BookingCalendar = () => {
     }
   }, []);
 
-  const pricing = computePricing(checkIn, checkOut);
+  useEffect(() => {
+    if (!checkIn || !checkOut) {
+      setPricing(null);
+      return;
+    }
+    
+    const fetchPricing = async () => {
+      setCalculatingPrice(true);
+      try {
+        const res = await fetch("http://localhost:3005/bookings/calculate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            check_in: format(checkIn, 'yyyy-MM-dd'),
+            check_out: format(checkOut, 'yyyy-MM-dd')
+          })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          setPricing(data);
+        } else {
+          console.error("Failed to calculate price");
+          setPricing(null);
+        }
+      } catch (error) {
+        console.error("Error calculating price:", error);
+        setPricing(null);
+      } finally {
+        setCalculatingPrice(false);
+      }
+    };
+
+    fetchPricing();
+  }, [checkIn, checkOut]);
 
   type CreatedBooking = {
     id: string;
@@ -113,6 +124,12 @@ export const BookingCalendar = () => {
       toast.error("Número de hóspedes inválido");
       return;
     }
+    
+    if (!pricing) {
+       toast.error("Erro ao calcular preço. Tente novamente.");
+       return;
+    }
+
     const API = "http://localhost:3005";
 
     setLoading(true);
@@ -134,7 +151,7 @@ export const BookingCalendar = () => {
           GuestPhone: guestPhone,
           NumberOfGuests: numberOfGuests,
           SubtotalPrice: pricing.subtotal,
-          DiscountAmount: pricing.discountAmount,
+          DiscountAmount: pricing.discount_amount,
           TotalPrice: pricing.total,
         }),
       });
@@ -146,7 +163,7 @@ export const BookingCalendar = () => {
           check_out: checkOut.toISOString().split("T")[0],
           number_of_guests: numberOfGuests,
           subtotal_price: pricing.subtotal,
-          discount_amount: pricing.discountAmount,
+          discount_amount: pricing.discount_amount,
           total_price: pricing.total,
         };
       }
@@ -158,7 +175,7 @@ export const BookingCalendar = () => {
         check_out: checkOut.toISOString().split("T")[0],
         number_of_guests: numberOfGuests,
         subtotal_price: pricing.subtotal,
-        discount_amount: pricing.discountAmount,
+        discount_amount: pricing.discount_amount,
         total_price: pricing.total,
       };
 
@@ -262,33 +279,78 @@ export const BookingCalendar = () => {
                 />
               </div>
 
-              {pricing.nights > 0 && (
+              {calculatingPrice && (
+                 <div className="p-4 bg-primary/10 rounded-lg space-y-2">
+                    <p className="text-center text-muted-foreground">Calculando preço...</p>
+                 </div>
+              )}
+
+              {!calculatingPrice && pricing && pricing.nights > 0 && (
                 <div className="p-4 bg-primary/10 rounded-lg space-y-2">
                   <div className="flex justify-between text-sm text-muted-foreground">
                     <span>Noites:</span>
                     <span className="font-medium">{pricing.nights}</span>
                   </div>
-                  <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>Noites de semana:</span>
-                    <span className="font-medium">{pricing.weekdayNights} × {formatBRL(BASE_PRICE)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>Finais de semana:</span>
-                    <span className="font-medium">{pricing.weekendNights} × {formatBRL(WEEKEND_PRICE)}</span>
-                  </div>
+                  {pricing.discount_amount > 0 && pricing.nights >= 28 && (
+                    <div className="flex justify-between text-sm text-green-700">
+                      <span>Promoção mensal aplicada</span>
+                      <span className="font-medium">5%</span>
+                    </div>
+                  )}
+                  {pricing.discount_amount > 0 && pricing.nights >= 7 && pricing.nights < 28 && (
+                    <div className="flex justify-between text-sm text-green-700">
+                      <span>Promoção semanal aplicada</span>
+                      <span className="font-medium">3%</span>
+                    </div>
+                  )}
+                  {Array.isArray(pricing.price_buckets) && pricing.price_buckets.length > 0 ? (
+                    pricing.price_buckets.map((b, idx) => (
+                      <div key={idx} className="flex justify-between text-sm text-muted-foreground">
+                        <span>Diárias:</span>
+                        <span className="font-medium">{b.count}{(typeof b.price === 'number' && isFinite(b.price)) ? ` × ${formatBRL(b.price)}` : ''}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <>
+                      <div className="flex justify-between text-sm text-muted-foreground">
+                        <span>Noites de semana:</span>
+                        <span className="font-medium">{pricing.weekday_nights}{(typeof pricing.base_price === 'number' && isFinite(pricing.base_price)) ? ` × ${formatBRL(pricing.base_price)}` : ''}</span>
+                      </div>
+                      <div className="flex justify-between text-sm text-muted-foreground">
+                        <span>Finais de semana:</span>
+                        <span className="font-medium">{pricing.weekend_nights}{(typeof pricing.weekend_price === 'number' && isFinite(pricing.weekend_price)) ? ` × ${formatBRL(pricing.weekend_price)}` : ''}</span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between text-sm text-muted-foreground">
                     <span>Subtotal:</span>
                     <span className="font-medium">{formatBRL(pricing.subtotal)}</span>
                   </div>
-                  {pricing.discountPercent > 0 && (
+                  {(pricing.cleaning_fee > 0 || pricing.service_fee > 0) && (
+                     <>
+                        {pricing.cleaning_fee > 0 && (
+                            <div className="flex justify-between text-sm text-muted-foreground">
+                                <span>Taxa de limpeza:</span>
+                                <span className="font-medium">{formatBRL(pricing.cleaning_fee)}</span>
+                            </div>
+                        )}
+                        {pricing.service_fee > 0 && (
+                            <div className="flex justify-between text-sm text-muted-foreground">
+                                <span>Taxa de serviço:</span>
+                                <span className="font-medium">{formatBRL(pricing.service_fee)}</span>
+                            </div>
+                        )}
+                     </>
+                  )}
+                  {pricing.discount_amount > 0 && (
                     <div className="flex justify-between text-sm text-green-600">
-                      <span>{pricing.nights >= 28 ? "Desconto mensal (5%)" : "Desconto semanal (3%)"}</span>
-                      <span className="font-medium">- {formatBRL(pricing.discountAmount)}</span>
+                      <span>{pricing.nights >= 28 ? "Desconto mensal" : "Desconto semanal"}</span>
+                      <span className="font-medium">- {formatBRL(pricing.discount_amount)}</span>
                     </div>
                   )}
-                  <div className="flex justify-between items-baseline border-t border-primary/20 pt-3">
+                  <div className="flex justify-between items-baseline border-t border-primary/20 pt-3 min-w-0 gap-2">
                     <span className="text-base md:text-lg font-semibold">Total:</span>
-                    <span className="text-2xl md:text-3xl font-extrabold text-gradient">{formatBRL(pricing.total)}</span>
+                    <span className="flex-1 text-right truncate text-2xl md:text-3xl font-extrabold text-gradient">{formatBRL(pricing.total)}</span>
                   </div>
                 </div>
               )}
@@ -297,6 +359,7 @@ export const BookingCalendar = () => {
                 onClick={handleBooking}
                 className="w-full"
                 variant="gradient"
+                disabled={loading || calculatingPrice || !pricing}
               >
                 {loading ? "Processando..." : "Confirmar Reserva"}
               </Button>

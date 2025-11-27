@@ -320,9 +320,10 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                 {messages.map((msg) => {
                   const isHost = msg.is_from_owner;
                   const senderName = isHost ? 'Você' : selectedBooking.guest_name;
-                  let special: any = null;
-                  try { special = JSON.parse(msg.message); } catch {}
-                  const isPaymentInvite = special && special.type === 'payment_invite';
+                  interface PaymentInvite { type: 'payment_invite'; text?: string; cta?: string; checkout_url?: string }
+                  let special: PaymentInvite | null = null;
+                  try { special = JSON.parse(msg.message) as PaymentInvite; } catch { special = null; }
+                  const isPaymentInvite = Boolean(special && special.type === 'payment_invite');
 
                   return (
                     <div key={msg.id} className={`flex ${isHost ? 'justify-end' : 'justify-start'}`}>
@@ -341,9 +342,20 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                             {isPaymentInvite ? (
                               <div className="space-y-2">
                                 <div className="font-medium">{String(special.text || '')}</div>
-                                <button className="w-full px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold opacity-90 cursor-not-allowed">
-                                  {String(special.cta || 'Pagar agora')}
-                                </button>
+                                {special && special.checkout_url ? (
+                                  <a
+                                    href={String(special.checkout_url)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center justify-center w-full px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold hover:bg-blue-700 transition-colors"
+                                  >
+                                    {String((special && special.cta) || 'Pagar agora')}
+                                  </a>
+                                ) : (
+                                  <button className="w-full px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold opacity-90 cursor-not-allowed">
+                                    {String((special && special.cta) || 'Pagar agora')}
+                                  </button>
+                                )}
                               </div>
                             ) : (
                               msg.message

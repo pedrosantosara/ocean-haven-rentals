@@ -87,7 +87,17 @@ export default function MyBooking() {
         headers.Authorization = `Bearer ${token}`;
       }
       const r = await fetch(url, { method: 'POST', headers });
-      if (!r.ok) { toast.error('Falha ao iniciar pagamento'); return; }
+      if (!r.ok) {
+        const checkoutUrl = `${API}/bookings/${booking.id}/checkout${pt ? `?pt=${encodeURIComponent(pt)}` : ''}`;
+        const rc = await fetch(checkoutUrl, { method: 'POST', headers });
+        if (rc.ok) {
+          const cj = await rc.json();
+          const u = String(cj.url || '');
+          if (u) { window.open(u, '_blank'); return; }
+        }
+        toast.error('Falha ao iniciar pagamento');
+        return;
+      }
       const j = await r.json();
       setPublishableKey(String(j.publishable_key || ''));
       setClientSecret(String(j.client_secret || ''));
@@ -166,6 +176,7 @@ export default function MyBooking() {
             case 'approved': return 'confirmed';
             case 'rejected': return 'cancelled';
             case 'requested': return 'pending';
+            case 'paid': return 'completed';
             default: return 'pending';
           }
         };
@@ -290,7 +301,7 @@ export default function MyBooking() {
       pending: 'Pendente',
       confirmed: 'Confirmada',
       cancelled: 'Cancelada',
-      completed: 'Concluída',
+      completed: 'Pago',
     };
     return <Badge variant={variants[status]}>{labels[status]}</Badge>;
   };
@@ -457,19 +468,23 @@ export default function MyBooking() {
                                 )}
                               </span>
                             </div>
-                            <Button
-                              onClick={() => booking && handlePay(booking)}
-                              className='w-full shadow-ocean mx-auto'
-                              variant='gradient'
-                            >
-                          Processar Pagamento
-                        </Button>
-                        {showPayment && (
-                          <div className='mt-4 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
-                            <div ref={paymentContainerRef} />
-                            <Button onClick={confirmPay} className='w-full mt-4' disabled={isPaying}>{isPaying ? 'Processando...' : 'Pagar'}</Button>
-                          </div>
-                        )}
+                            {booking.status === 'confirmed' && (
+                              <>
+                                <Button
+                                  onClick={() => booking && handlePay(booking)}
+                                  className='w-full shadow-ocean mx-auto'
+                                  variant='gradient'
+                                >
+                                  Processar Pagamento
+                                </Button>
+                                {showPayment && (
+                                  <div className='mt-4 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
+                                    <div ref={paymentContainerRef} />
+                                    <Button onClick={confirmPay} className='w-full mt-4' disabled={isPaying}>{isPaying ? 'Processando...' : 'Pagar'}</Button>
+                                  </div>
+                                )}
+                              </>
+                            )}
                       </div>
                       <p className='mt-3 text-xs md:text-sm text-muted-foreground'>
                         Price breakdown

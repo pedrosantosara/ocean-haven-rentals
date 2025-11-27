@@ -384,11 +384,169 @@ func (s *Server) handleCreateBooking(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if _, err := s.pool.Exec(r.Context(), "INSERT INTO bookings (owner_id,customer_id,status,check_in,check_out,guest_name,guest_email,guest_phone,number_of_guests,subtotal_price,discount_amount,total_price) VALUES ($1,$2,'requested',$3,$4,$5,$6,$7,$8,$9,$10,$11)", ownerID, customerID, body.CheckIn, body.CheckOut, body.GuestName, body.GuestEmail, body.GuestPhone, body.NumberOfGuests, body.SubtotalPrice, body.DiscountAmount, body.TotalPrice); err != nil {
+	// Calculate authoritative pricing
+	var ciTS, coTS time.Time
+	var ciStr, coStr string
+	if t, e := time.Parse(time.RFC3339, body.CheckIn); e == nil {
+		ciTS = t
+		ciStr = t.Format("2006-01-02")
+	} else if t2, e2 := time.Parse("2006-01-02", body.CheckIn); e2 == nil {
+		ciTS = t2
+		ciStr = body.CheckIn
+	}
+	if t, e := time.Parse(time.RFC3339, body.CheckOut); e == nil {
+		coTS = t
+		coStr = t.Format("2006-01-02")
+	} else if t2, e2 := time.Parse("2006-01-02", body.CheckOut); e2 == nil {
+		coTS = t2
+		coStr = body.CheckOut
+	}
+	if ciStr == "" || coStr == "" {
+		jsonResp(w, 400, map[string]string{"error": "invalid_dates"})
+		return
+	}
+	pricing, err := s.calculatePrice(r.Context(), ciStr, coStr)
+	if err != nil {
+		jsonResp(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if _, err := s.pool.Exec(r.Context(), "INSERT INTO bookings (owner_id,customer_id,status,check_in,check_out,guest_name,guest_email,guest_phone,number_of_guests,subtotal_price,discount_amount,total_price) VALUES ($1,$2,'requested',$3,$4,$5,$6,$7,$8,$9,$10,$11)", ownerID, customerID, ciTS, coTS, body.GuestName, body.GuestEmail, body.GuestPhone, body.NumberOfGuests, pricing.Subtotal, pricing.DiscountAmount, pricing.Total); err != nil {
 		jsonResp(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	jsonResp(w, 200, map[string]string{"status": "requested"})
+}
+
+type Pricing struct {
+	Subtotal       float64       `json:"subtotal"`
+	DiscountAmount float64       `json:"discount_amount"`
+	CleaningFee    float64       `json:"cleaning_fee"`
+	ServiceFee     float64       `json:"service_fee"`
+	Total          float64       `json:"total"`
+	Nights         int           `json:"nights"`
+	WeekdayNights  int           `json:"weekday_nights"`
+	WeekendNights  int           `json:"weekend_nights"`
+	BasePrice      float64       `json:"base_price"`
+	WeekendPrice   float64       `json:"weekend_price"`
+	PriceBuckets   []PriceBucket `json:"price_buckets"`
+}
+
+type PriceBucket struct {
+	Price float64 `json:"price"`
+	Count int     `json:"count"`
+}
+
+func (s *Server) calculatePrice(ctx context.Context, checkInStr, checkOutStr string) (*Pricing, error) {
+	checkIn, err := time.Parse("2006-01-02", checkInStr)
+	if err != nil {
+		return nil, err
+	}
+	checkOut, err := time.Parse("2006-01-02", checkOutStr)
+	if err != nil {
+		return nil, err
+	}
+	if !checkOut.After(checkIn) {
+		return nil, fmt.Errorf("checkout must be after checkin")
+	}
+
+	// Fetch settings
+	var base, weekend, cleaning, service, dw, dm float64
+	// Use the most recently updated settings (assuming single property/owner context for now based on existing code)
+	err = s.pool.QueryRow(ctx, "SELECT COALESCE(base_price,0)::float8, COALESCE(weekend_price,0)::float8, COALESCE(cleaning_fee,0)::float8, COALESCE(service_fee,0)::float8, COALESCE(discount_weekly,0)::float8, COALESCE(discount_monthly,0)::float8 FROM settings ORDER BY id DESC LIMIT 1").Scan(&base, &weekend, &cleaning, &service, &dw, &dm)
+	if err != nil {
+		return nil, err
+	}
+
+	var subtotal float64
+	nights := 0
+	weekdayNights := 0
+	weekendNights := 0
+
+	rows, _ := s.pool.Query(ctx, "SELECT date, COALESCE(price,0)::float8 FROM date_prices WHERE date >= $1 AND date < $2", checkIn, checkOut)
+	overrides := make(map[string]float64)
+	for rows.Next() {
+		var d time.Time
+		var p float64
+		_ = rows.Scan(&d, &p)
+		overrides[d.Format("2006-01-02")] = p
+	}
+
+	bucketCounts := make(map[float64]int)
+	for d := checkIn; d.Before(checkOut); d = d.AddDate(0, 0, 1) {
+		nights++
+		key := d.Format("2006-01-02")
+		price := base
+		wd := d.Weekday()
+		if v, ok := overrides[key]; ok {
+			price = v
+			if wd == time.Friday || wd == time.Saturday {
+				weekendNights++
+			} else {
+				weekdayNights++
+			}
+		} else {
+			if (wd == time.Friday || wd == time.Saturday) && weekend > 0 {
+				price = weekend
+				weekendNights++
+			} else {
+				weekdayNights++
+			}
+		}
+		subtotal += price
+		bucketCounts[price] = bucketCounts[price] + 1
+	}
+
+	discountPct := 0.0
+	if nights >= 28 {
+		discountPct = dm
+	} else if nights >= 7 {
+		discountPct = dw
+	}
+
+	discountAmount := subtotal * (discountPct / 100)
+	total := subtotal - discountAmount + cleaning + service
+
+	var buckets []PriceBucket
+	for p, c := range bucketCounts {
+		buckets = append(buckets, PriceBucket{Price: p, Count: c})
+	}
+	return &Pricing{
+		Subtotal:       mathRound(subtotal, 2),
+		DiscountAmount: mathRound(discountAmount, 2),
+		CleaningFee:    mathRound(cleaning, 2),
+		ServiceFee:     mathRound(service, 2),
+		Total:          mathRound(total, 2),
+		Nights:         nights,
+		WeekdayNights:  weekdayNights,
+		WeekendNights:  weekendNights,
+		BasePrice:      base,
+		WeekendPrice:   weekend,
+		PriceBuckets:   buckets,
+	}, nil
+}
+
+func (s *Server) handleCalculatePrice(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		CheckIn  string `json:"check_in"`
+		CheckOut string `json:"check_out"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonResp(w, 400, map[string]string{"error": "invalid_json"})
+		return
+	}
+	if body.CheckIn == "" || body.CheckOut == "" {
+		jsonResp(w, 400, map[string]string{"error": "missing_dates"})
+		return
+	}
+
+	pricing, err := s.calculatePrice(r.Context(), body.CheckIn, body.CheckOut)
+	if err != nil {
+		jsonResp(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+
+	jsonResp(w, 200, pricing)
 }
 
 func (s *Server) handleListBookingsOwner(w http.ResponseWriter, r *http.Request) {
@@ -502,18 +660,56 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	_, _ = rand.Read(buf[:])
 	token := hex.EncodeToString(buf[:])
 	_, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET payment_token=$1 WHERE id=$2", token, id)
-	if s.email != nil {
-		link := "https://localhost:3000/my-booking?pt=" + url.QueryEscape(token) + "&bookingId=" + url.QueryEscape(id)
-		_ = s.email.SendBookingAcceptedEmail(guestEmail, emailpkg.BookingEmailData{Name: guestName, CheckIn: ci.Format("2006-01-02"), CheckOut: co.Format("2006-01-02"), Guests: guests, TotalPrice: total, PaymentLink: link})
+	var checkoutURL string
+	if s.stripeSecret != "" {
+		amount := int64(total * 100)
+		form := url.Values{}
+		form.Set("mode", "payment")
+		form.Set("success_url", "http://localhost:3000/my-booking?payment=success&booking_id="+url.QueryEscape(id))
+		form.Set("cancel_url", "http://localhost:3000/my-booking?payment=cancel&booking_id="+url.QueryEscape(id))
+		form.Set("line_items[0][price_data][currency]", "brl")
+		form.Set("line_items[0][price_data][product_data][name]", "Reserva "+guestName)
+		form.Set("line_items[0][price_data][unit_amount]", fmt.Sprintf("%d", amount))
+		form.Set("line_items[0][quantity]", "1")
+		form.Set("metadata[booking_id]", id)
+		form.Set("expand[0]", "payment_intent")
+		form.Set("expand[0]", "payment_intent")
+		req, _ := http.NewRequest("POST", "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(form.Encode()))
+		req.Header.Set("Authorization", "Bearer "+s.stripeSecret)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			b, _ := io.ReadAll(resp.Body)
+			var cs struct {
+				ID, URL       string
+				PaymentIntent struct{ ID string } `json:"payment_intent"`
+			}
+			_ = json.Unmarshal(b, &cs)
+			if cs.ID != "" {
+				_, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET stripe_checkout_session_id=$1 WHERE id=$2", cs.ID, id)
+			}
+			if cs.PaymentIntent.ID != "" {
+				_, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET stripe_intent_id=$1 WHERE id=$2", cs.PaymentIntent.ID, id)
+			}
+			if cs.URL != "" {
+				checkoutURL = cs.URL
+			}
+		}
 	}
-	payMsg := map[string]any{"type": "payment_invite", "text": "Sua reserva foi aprovada! Para concluir, realize o pagamento.", "cta": "Pagar agora", "booking_id": id}
+	if checkoutURL == "" {
+		checkoutURL = "http://localhost:3000/my-booking?pt=" + url.QueryEscape(token) + "&bookingId=" + url.QueryEscape(id)
+	}
+	if s.email != nil {
+		_ = s.email.SendBookingAcceptedEmail(guestEmail, emailpkg.BookingEmailData{Name: guestName, CheckIn: ci.Format("2006-01-02"), CheckOut: co.Format("2006-01-02"), Guests: guests, TotalPrice: total, PaymentLink: checkoutURL})
+	}
+	payMsg := map[string]any{"type": "payment_invite", "text": "Sua reserva foi aprovada! Para concluir, realize o pagamento.", "cta": "Pagar agora", "booking_id": id, "checkout_url": checkoutURL}
 	msgStr, _ := json.Marshal(payMsg)
 	_, _ = s.pool.Exec(r.Context(), "INSERT INTO messages (booking_id, sender_email, is_from_owner, message) VALUES ($1,$2,$3,$4)", id, c["email"], true, string(msgStr))
 	payload, _ := json.Marshal(map[string]any{"type": "message", "data": map[string]any{"booking_id": id, "sender_email": c["email"], "is_from_owner": true, "message": string(msgStr), "created_at": time.Now().Format(time.RFC3339)}})
 	s.hub.Broadcast(id, payload)
 	if s.email != nil && guestEmail != "" {
-		link := "https://localhost:3000/my-booking"
-		_ = s.email.SendChatNotificationEmail(guestEmail, emailpkg.ChatMessageEmailData{SenderName: "Ocean Haven", Message: "Sua reserva foi aprovada! Para pagar, acesse: " + link, Timestamp: time.Now().Format(time.RFC3339)})
+		_ = s.email.SendChatNotificationEmail(guestEmail, emailpkg.ChatMessageEmailData{SenderName: "Ocean Haven", Message: "Sua reserva foi aprovada! Para pagar, acesse: " + checkoutURL, Timestamp: time.Now().Format(time.RFC3339)})
 	}
 	jsonResp(w, 200, map[string]string{"status": "approved"})
 }
@@ -549,6 +745,15 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil {
 		jsonResp(w, 500, map[string]string{"error": err.Error()})
 		return
+	}
+	if !isOwner {
+		var customerEmail, guestEmail string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", body.BookingID).Scan(&customerEmail, &guestEmail)
+		email := fmt.Sprintf("%v", c["email"])
+		if email != customerEmail && email != guestEmail {
+			jsonResp(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
 	}
 
 	if _, err := s.pool.Exec(r.Context(), "INSERT INTO messages (booking_id, sender_email, is_from_owner, message) VALUES ($1,$2,$3,$4)", body.BookingID, c["email"], isOwner, body.Message); err != nil {
@@ -608,7 +813,21 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
+	c := getClaims(r)
 	bookingID := r.URL.Query().Get("booking_id")
+	if bookingID == "" {
+		jsonResp(w, 400, map[string]string{"error": "missing_booking_id"})
+		return
+	}
+	var customerEmail, guestEmail, ownerEmail string
+	_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,''), COALESCE(o.email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id LEFT JOIN users o ON b.owner_id=o.id WHERE b.id=$1", bookingID).Scan(&customerEmail, &guestEmail, &ownerEmail)
+	var isOwner bool
+	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+	email := fmt.Sprintf("%v", c["email"])
+	if !isOwner && email != customerEmail && email != guestEmail {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
 	rows, err := s.pool.Query(r.Context(), "SELECT id, booking_id, sender_email, is_from_owner, message, created_at FROM messages WHERE booking_id=$1 ORDER BY created_at ASC", bookingID)
 	if err != nil {
 		jsonResp(w, 500, map[string]string{"error": err.Error()})
@@ -804,6 +1023,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   number_of_guests INT,
   total_price NUMERIC,
   stripe_intent_id TEXT,
+  stripe_checkout_session_id TEXT,
   paid_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP
@@ -830,6 +1050,11 @@ CREATE TABLE IF NOT EXISTS settings (
   discount_monthly NUMERIC,
   updated_at TIMESTAMP DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS date_prices (
+  date DATE PRIMARY KEY,
+  price NUMERIC NOT NULL,
+  updated_at TIMESTAMP DEFAULT now()
+);
 `)
 	_, err := pool.Exec(ctx, `
 ALTER TABLE users ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
@@ -845,6 +1070,7 @@ ALTER TABLE bookings ADD COLUMN IF NOT EXISTS subtotal_price NUMERIC;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS discount_amount NUMERIC;
 ALTER TABLE icals ADD COLUMN IF NOT EXISTS last_sync TIMESTAMP;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_intent_id TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS stripe_checkout_session_id TEXT;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP;
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_token TEXT;
 `)
@@ -1038,6 +1264,20 @@ func (s *Server) handleWSMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	claims, ok := tkn.Claims.(jwt.MapClaims)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var isOwner bool
+	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", claims["email"]).Scan(&isOwner)
+	var customerEmail, guestEmail string
+	_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", bookingID).Scan(&customerEmail, &guestEmail)
+	email := fmt.Sprintf("%v", claims["email"])
+	if !isOwner && email != customerEmail && email != guestEmail {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -1119,6 +1359,7 @@ func main() {
 	r.HandleFunc("/blocks", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/blocks/unblock", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/bookings", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+	r.HandleFunc("/bookings/calculate", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/bookings/mine", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/bookings/{id}/approve", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/bookings/{id}/reject", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
@@ -1186,12 +1427,18 @@ func main() {
 		jsonResp(w, 200, map[string]bool{"sent": true})
 	}).Methods("GET")
 	r.HandleFunc("/settings/public", s.handleGetSettingsPublic).Methods("GET")
+	r.Handle("/date-prices", s.authMiddleware(http.HandlerFunc(s.handleGetDatePrices))).Methods("GET")
+	r.Handle("/date-prices", s.authMiddleware(http.HandlerFunc(s.handlePutDatePrice))).Methods("PUT")
+	r.Handle("/date-prices/{date}", s.authMiddleware(http.HandlerFunc(s.handleDeleteDatePrice))).Methods("DELETE")
+	r.Handle("/date-prices/bulk", s.authMiddleware(http.HandlerFunc(s.handlePutDatePriceBulk))).Methods("PUT")
 	r.HandleFunc("/bookings", s.handleCreateBooking).Methods("POST")
+	r.HandleFunc("/bookings/calculate", s.handleCalculatePrice).Methods("POST")
 	r.Handle("/bookings", s.authMiddleware(http.HandlerFunc(s.handleListBookingsOwner))).Methods("GET")
 	r.Handle("/bookings/mine", s.authMiddleware(http.HandlerFunc(s.handleListBookingsMine))).Methods("GET")
 	r.Handle("/bookings/{id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApprove))).Methods("POST")
 	r.Handle("/bookings/{id}/reject", s.authMiddleware(http.HandlerFunc(s.handleReject))).Methods("POST")
 	r.HandleFunc("/bookings/{id}/payment-intent", s.handleCreatePaymentIntent).Methods("POST")
+	r.HandleFunc("/bookings/{id}/checkout", s.handleCreateCheckoutSession).Methods("POST")
 	r.HandleFunc("/bookings/{id}/mark-paid", s.handleMarkPaid).Methods("POST")
 	r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handlePostMessage))).Methods("POST")
 	r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handleGetMessages))).Methods("GET")
@@ -1263,8 +1510,138 @@ func (s *Server) handleGetSettingsPublic(w http.ResponseWriter, r *http.Request)
 	jsonResp(w, 200, map[string]any{"settings": map[string]any{"property_name": propertyName, "checkin_time": checkin, "checkout_time": checkout, "base_price": base, "weekend_price": weekend, "cleaning_fee": cleaning, "service_fee": service, "discount_weekly": dw, "discount_monthly": dm}})
 }
 
-func (s *Server) handleCreatePaymentIntent(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetDatePrices(w http.ResponseWriter, r *http.Request) {
 	c := getClaims(r)
+	var isOwner bool
+	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+	if !isOwner {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	var rows pgx.Rows
+	var err error
+	if start != "" && end != "" {
+		var st, en time.Time
+		st, _ = time.Parse("2006-01-02", start)
+		en, _ = time.Parse("2006-01-02", end)
+		rows, err = s.pool.Query(r.Context(), "SELECT date, COALESCE(price,0)::float8 FROM date_prices WHERE date >= $1 AND date <= $2 ORDER BY date ASC", st, en)
+	} else {
+		rows, err = s.pool.Query(r.Context(), "SELECT date, COALESCE(price,0)::float8 FROM date_prices ORDER BY date ASC")
+	}
+	if err != nil {
+		jsonResp(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	type rec struct {
+		Date  time.Time `json:"date"`
+		Price float64   `json:"price"`
+	}
+	var out []rec
+	for rows.Next() {
+		var d time.Time
+		var p float64
+		_ = rows.Scan(&d, &p)
+		out = append(out, rec{Date: d, Price: p})
+	}
+	jsonResp(w, 200, map[string]any{"data": out})
+}
+
+func (s *Server) handlePutDatePrice(w http.ResponseWriter, r *http.Request) {
+	c := getClaims(r)
+	var isOwner bool
+	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+	if !isOwner {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	var body struct {
+		Date  string
+		Price float64
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.Date == "" {
+		jsonResp(w, 400, map[string]string{"error": "missing_date"})
+		return
+	}
+	var dt time.Time
+	dt, _ = time.Parse("2006-01-02", body.Date)
+	_, err := s.pool.Exec(r.Context(), "INSERT INTO date_prices (date, price, updated_at) VALUES ($1,$2,now()) ON CONFLICT (date) DO UPDATE SET price=EXCLUDED.price, updated_at=now()", dt, body.Price)
+	if err != nil {
+		jsonResp(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResp(w, 200, map[string]bool{"success": true})
+}
+
+func (s *Server) handleDeleteDatePrice(w http.ResponseWriter, r *http.Request) {
+	c := getClaims(r)
+	var isOwner bool
+	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+	if !isOwner {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	dateStr := mux.Vars(r)["date"]
+	if dateStr == "" {
+		jsonResp(w, 400, map[string]string{"error": "missing_date"})
+		return
+	}
+	var dt time.Time
+	dt, _ = time.Parse("2006-01-02", dateStr)
+	_, err := s.pool.Exec(r.Context(), "DELETE FROM date_prices WHERE date=$1", dt)
+	if err != nil {
+		jsonResp(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResp(w, 200, map[string]bool{"success": true})
+}
+
+func (s *Server) handlePutDatePriceBulk(w http.ResponseWriter, r *http.Request) {
+	c := getClaims(r)
+	var isOwner bool
+	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+	if !isOwner {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	var body struct {
+		Dates []string
+		Price float64
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if len(body.Dates) == 0 {
+		jsonResp(w, 400, map[string]string{"error": "missing_dates"})
+		return
+	}
+	cnt := 0
+	for _, ds := range body.Dates {
+		if strings.TrimSpace(ds) == "" {
+			continue
+		}
+		dt, err := time.Parse("2006-01-02", ds)
+		if err != nil {
+			continue
+		}
+		if _, err := s.pool.Exec(r.Context(), "INSERT INTO date_prices (date, price, updated_at) VALUES ($1,$2,now()) ON CONFLICT (date) DO UPDATE SET price=EXCLUDED.price, updated_at=now()", dt, body.Price); err == nil {
+			cnt++
+		}
+	}
+	jsonResp(w, 200, map[string]int{"updated": cnt})
+}
+
+func (s *Server) handleCreatePaymentIntent(w http.ResponseWriter, r *http.Request) {
+	var c jwt.MapClaims
+	hdr := r.Header.Get("Authorization")
+	if strings.HasPrefix(hdr, "Bearer ") {
+		tokenStr := strings.TrimPrefix(hdr, "Bearer ")
+		if tkn, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) { return []byte(s.jwtSecret), nil }); err == nil && tkn.Valid {
+			if cl, ok := tkn.Claims.(jwt.MapClaims); ok {
+				c = cl
+			}
+		}
+	}
 	id := mux.Vars(r)["id"]
 	if id == "" {
 		jsonResp(w, 400, map[string]string{"error": "missing_id"})
@@ -1287,8 +1664,9 @@ func (s *Server) handleCreatePaymentIntent(w http.ResponseWriter, r *http.Reques
 	pt := r.URL.Query().Get("pt")
 	var isOwner bool
 	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+	email := fmt.Sprintf("%v", c["email"])
 	if pt == "" {
-		if !isOwner && c["email"] != customerEmail {
+		if !isOwner && email != customerEmail && email != guestEmail {
 			jsonResp(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
@@ -1334,6 +1712,94 @@ func (s *Server) handleCreatePaymentIntent(w http.ResponseWriter, r *http.Reques
 	jsonResp(w, 200, map[string]any{"client_secret": si.ClientSecret, "publishable_key": s.stripePublic})
 }
 
+func (s *Server) handleCreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	var c jwt.MapClaims
+	hdr := r.Header.Get("Authorization")
+	if strings.HasPrefix(hdr, "Bearer ") {
+		tokenStr := strings.TrimPrefix(hdr, "Bearer ")
+		if tkn, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) { return []byte(s.jwtSecret), nil }); err == nil && tkn.Valid {
+			if cl, ok := tkn.Claims.(jwt.MapClaims); ok {
+				c = cl
+			}
+		}
+	}
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		jsonResp(w, 400, map[string]string{"error": "missing_id"})
+		return
+	}
+	if s.stripeSecret == "" {
+		jsonResp(w, 500, map[string]string{"error": "stripe_not_configured"})
+		return
+	}
+	var customerEmail, status string
+	var total float64
+	var guestEmail, guestName string
+	var paymentToken string
+	err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.status,'requested'), COALESCE(b.total_price,0)::float8, COALESCE(b.guest_email,''), COALESCE(b.guest_name,''), COALESCE(b.payment_token,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", id).Scan(&customerEmail, &status, &total, &guestEmail, &guestName, &paymentToken)
+	if err != nil {
+		jsonResp(w, 404, map[string]string{"error": "booking_not_found"})
+		return
+	}
+	// Allow if owner or customer, or with payment token
+	pt := r.URL.Query().Get("pt")
+	var isOwner bool
+	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
+	email := fmt.Sprintf("%v", c["email"])
+	if pt == "" {
+		if !isOwner && email != customerEmail && email != guestEmail {
+			jsonResp(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+	} else {
+		if pt != paymentToken {
+			jsonResp(w, 403, map[string]string{"error": "invalid_token"})
+			return
+		}
+	}
+	if status != "approved" {
+		jsonResp(w, 409, map[string]string{"error": "booking_not_approved"})
+		return
+	}
+	amount := int64(total * 100)
+	form := url.Values{}
+	form.Set("mode", "payment")
+	form.Set("success_url", "http://localhost:3000/my-booking?payment=success&booking_id="+url.QueryEscape(id))
+	form.Set("cancel_url", "http://localhost:3000/my-booking?payment=cancel&booking_id="+url.QueryEscape(id))
+	form.Set("line_items[0][price_data][currency]", "brl")
+	form.Set("line_items[0][price_data][product_data][name]", "Reserva "+guestName)
+	form.Set("line_items[0][price_data][unit_amount]", fmt.Sprintf("%d", amount))
+	form.Set("line_items[0][quantity]", "1")
+	form.Set("metadata[booking_id]", id)
+	req, _ := http.NewRequest("POST", "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(form.Encode()))
+	req.Header.Set("Authorization", "Bearer "+s.stripeSecret)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		jsonResp(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		jsonResp(w, resp.StatusCode, map[string]any{"error": "stripe_error", "body": string(body)})
+		return
+	}
+	var cs struct {
+		ID            string              `json:"id"`
+		URL           string              `json:"url"`
+		PaymentIntent struct{ ID string } `json:"payment_intent"`
+	}
+	_ = json.Unmarshal(body, &cs)
+	if cs.ID != "" {
+		_, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET stripe_checkout_session_id=$1 WHERE id=$2", cs.ID, id)
+	}
+	if cs.PaymentIntent.ID != "" {
+		_, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET stripe_intent_id=$1 WHERE id=$2", cs.PaymentIntent.ID, id)
+	}
+	jsonResp(w, 200, map[string]any{"url": cs.URL})
+}
+
 func (s *Server) handleMarkPaid(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	if id == "" {
@@ -1367,9 +1833,15 @@ func (s *Server) handleMarkPaid(w http.ResponseWriter, r *http.Request) {
 		_, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET status='paid', paid_at=now(), updated_at=now() WHERE id=$1", id)
 		var guestEmail, guestName string
 		var total float64
-		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_email,''), COALESCE(guest_name,''), COALESCE(total_price,0)::float8 FROM bookings WHERE id=$1", id).Scan(&guestEmail, &guestName, &total)
+		var ownerEmail string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(b.guest_email,''), COALESCE(b.guest_name,''), COALESCE(b.total_price,0)::float8, COALESCE(u.email,'') FROM bookings b LEFT JOIN users u ON b.owner_id=u.id WHERE b.id=$1", id).Scan(&guestEmail, &guestName, &total, &ownerEmail)
 		if s.email != nil {
-			_ = s.email.SendPaymentConfirmationEmail(guestEmail, emailpkg.PaymentEmailData{Name: guestName, Amount: total, Date: time.Now().Format(time.RFC3339), ReservationID: id})
+			if guestEmail != "" {
+				_ = s.email.SendPaymentConfirmationEmail(guestEmail, emailpkg.PaymentEmailData{Name: guestName, Amount: total, Date: time.Now().Format(time.RFC3339), ReservationID: id})
+			}
+			if ownerEmail != "" {
+				_ = s.email.SendRawEmail(ownerEmail, "Reserva paga", fmt.Sprintf("<p>A reserva %s foi paga por %s.</p><p>Total: R$ %.2f</p>", id, guestName, total), "")
+			}
 		}
 		jsonResp(w, 200, map[string]bool{"paid": true})
 		return

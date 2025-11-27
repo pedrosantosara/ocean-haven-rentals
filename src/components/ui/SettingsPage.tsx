@@ -19,10 +19,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
   const [propertyName, setPropertyName] = useState('');
   const [checkinTime, setCheckinTime] = useState('');
   const [checkoutTime, setCheckoutTime] = useState('');
-  const [basePrice, setBasePrice] = useState<number>(500);
-  const [weekendPrice, setWeekendPrice] = useState<number>(600);
-  const [cleaningFee, setCleaningFee] = useState<number>(150);
-  const [serviceFee, setServiceFee] = useState<number>(10);
+  const [basePrice, setBasePrice] = useState<number | ''>('');
+  const [weekendPrice, setWeekendPrice] = useState<number | ''>('');
+  const [cleaningFee, setCleaningFee] = useState<number | ''>('');
+  const [serviceFee, setServiceFee] = useState<number | ''>('');
+  const [weeklyPromoEnabled, setWeeklyPromoEnabled] = useState(false);
+  const [monthlyPromoEnabled, setMonthlyPromoEnabled] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -37,10 +39,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
         setPropertyName(String(s.property_name || ''));
         setCheckinTime(String(s.checkin_time || ''));
         setCheckoutTime(String(s.checkout_time || ''));
-        setBasePrice(Number(s.base_price || basePrice));
-        setWeekendPrice(Number(s.weekend_price || weekendPrice));
-        setCleaningFee(Number(s.cleaning_fee || cleaningFee));
-        setServiceFee(Number(s.service_fee || serviceFee));
+        setBasePrice(s.base_price !== undefined ? Number(s.base_price) : '');
+        setWeekendPrice(s.weekend_price !== undefined ? Number(s.weekend_price) : '');
+        setCleaningFee(s.cleaning_fee !== undefined ? Number(s.cleaning_fee) : '');
+        setServiceFee(s.service_fee !== undefined ? Number(s.service_fee) : '');
+        setWeeklyPromoEnabled(Number(s.discount_weekly || 0) > 0);
+        setMonthlyPromoEnabled(Number(s.discount_monthly || 0) > 0);
       } catch (_) { return; }
     })();
   }, []);
@@ -69,6 +73,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
         WeekendPrice: weekendPrice,
         CleaningFee: cleaningFee,
         ServiceFee: serviceFee,
+        DiscountWeekly: weeklyPromoEnabled ? 3 : 0,
+        DiscountMonthly: monthlyPromoEnabled ? 5 : 0,
       };
       const r = await fetch(`${API}/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
       if (!r.ok) return;
@@ -420,6 +426,41 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
                     </div>
                   </div>
 
+                  <div>
+                    <h3 className="text-lg font-semibold text-zinc-900 mb-4">Promoções</h3>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-medium text-zinc-900">Desconto semanal (3%)</h4>
+                          <p className="text-sm text-zinc-500">Aplica ao completar 7 noites</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="sr-only peer"
+                            checked={weeklyPromoEnabled}
+                            onChange={(e) => setWeeklyPromoEnabled(e.target.checked)}
+                          />
+                          <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-zinc-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-900"></div>
+                        </label>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-medium text-zinc-900">Desconto mensal (5%)</h4>
+                          <p className="text-sm text-zinc-500">Aplica ao completar 28 noites</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="sr-only peer"
+                            checked={monthlyPromoEnabled}
+                            onChange={(e) => setMonthlyPromoEnabled(e.target.checked)}
+                          />
+                          <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-zinc-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-900"></div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
 
                 </div>
               )}
