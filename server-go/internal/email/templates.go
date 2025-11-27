@@ -30,6 +30,11 @@ func BookingAcceptedTemplate(data BookingEmailData) string {
 	return baseTemplate("Reserva confirmada", body)
 }
 
+func BookingCancelledTemplate(data BookingEmailData) string {
+    body := fmt.Sprintf(`<p>Olá, %s!</p><p>Sua hospedagem foi cancelada.</p><div class="box"><div><strong>Check-in:</strong> %s</div><div><strong>Check-out:</strong> %s</div><div><strong>Hóspedes:</strong> %d</div><div><strong>Total:</strong> R$ %.2f</div></div><p>As datas foram liberadas para novas reservas. Se tiver dúvidas, responda este email.</p>`, data.Name, data.CheckIn, data.CheckOut, data.Guests, data.TotalPrice)
+    return baseTemplate("Reserva cancelada", body)
+}
+
 func ChatNotificationTemplate(data ChatMessageEmailData) string {
 	linkBtn := ""
 	if data.ChatLink != "" {

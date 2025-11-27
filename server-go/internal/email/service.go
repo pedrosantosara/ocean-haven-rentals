@@ -49,6 +49,10 @@ func (s *EmailService) SendBookingAcceptedEmail(to string, data BookingEmailData
     return s.send(to, "Reserva confirmada", BookingAcceptedTemplate(data))
 }
 
+func (s *EmailService) SendBookingCancelledEmail(to string, data BookingEmailData) error {
+    return s.send(to, "Reserva cancelada", BookingCancelledTemplate(data))
+}
+
 func (s *EmailService) SendChatNotificationEmail(to string, data ChatMessageEmailData) error {
     return s.send(to, "Nova mensagem no chat", ChatNotificationTemplate(data))
 }

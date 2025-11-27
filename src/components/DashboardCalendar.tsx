@@ -56,7 +56,7 @@ export function DashboardCalendar({ bookings, onUpdate }: DashboardCalendarProps
   ) => {
     const token = localStorage.getItem("token");
     if (!token) { toast.error("Faça login como proprietário"); return; }
-    const endpoint = status === "confirmed" ? `${API}/bookings/${bookingId}/approve` : `${API}/bookings/${bookingId}/reject`;
+    const endpoint = status === "confirmed" ? `${API}/bookings/${bookingId}/approve` : `${API}/bookings/${bookingId}/cancel`;
     const res = await fetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) { toast.error("Erro ao atualizar status"); return; }
     toast.success("Status atualizado");
@@ -255,9 +255,14 @@ export function DashboardCalendar({ bookings, onUpdate }: DashboardCalendarProps
                     Aprovar
                   </Button>
                 )}
-                {selectedBooking.status !== "cancelled" && (
+                {selectedBooking.status === "pending" && (
                   <Button variant="destructive" onClick={() => updateBookingStatus(selectedBooking.id, "cancelled")} className="flex-1">
                     Rejeitar
+                  </Button>
+                )}
+                {(selectedBooking.status === "confirmed" || selectedBooking.status === "approved") && (
+                  <Button variant="destructive" onClick={() => updateBookingStatus(selectedBooking.id, "cancelled")} className="flex-1">
+                    Cancelar
                   </Button>
                 )}
               </div>

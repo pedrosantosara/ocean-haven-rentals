@@ -64,6 +64,10 @@ export const NewDashboard: React.FC = () => {
     () => reservations.filter(r => ['requested', 'pending'].includes((r.status || '').toLowerCase())),
     [reservations]
   );
+  const acceptedReservations = useMemo(
+    () => reservations.filter(r => ['approved','confirmed'].includes((r.status || '').toLowerCase())),
+    [reservations]
+  );
 
   useEffect(() => {
     loadDashboardData();
@@ -470,6 +474,52 @@ export const NewDashboard: React.FC = () => {
               );
             })
           )}
+        </div>
+
+        <div className="space-y-6">
+          <div className="bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="p-4 bg-emerald-50/50 border-b border-zinc-200/60 flex items-center justify-between">
+              <span className="text-sm font-medium text-emerald-900 flex items-center gap-2">
+                Hospedagens Aceitas
+              </span>
+              <span className="text-xs text-emerald-700/70 font-mono">{acceptedReservations.length}</span>
+            </div>
+            <div className="p-6">
+              {acceptedReservations.length === 0 ? (
+                <div className="text-center text-sm text-zinc-500">Nenhuma hospedagem aceita</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {acceptedReservations.map((r) => (
+                    <div key={r.id} className="border border-zinc-200 rounded-lg p-4 flex items-start justify-between">
+                      <div>
+                        <h4 className="font-medium text-zinc-900">{r.guestName}</h4>
+                        {r.guestEmail && (<p className="text-sm text-zinc-500">{r.guestEmail}</p>)}
+                        <div className="mt-2 text-xs text-zinc-500">
+                          {format(new Date(r.checkIn), 'dd MMM', { locale: ptBR })} — {format(new Date(r.checkOut), 'dd MMM', { locale: ptBR })}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="px-3 py-2 text-sm font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50"
+                          onClick={async () => {
+                            try {
+                              const token = localStorage.getItem('token');
+                              const API = 'http://localhost:3005';
+                              const res = await fetch(`${API}/bookings/${r.id}/cancel`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+                              if (res.ok) { await loadDashboardData(); document.dispatchEvent(new Event('ical:updated')); toast.success('Hospedagem cancelada'); }
+                              else { toast.error('Erro ao cancelar'); }
+                            } catch { /* noop */ }
+                          }}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 

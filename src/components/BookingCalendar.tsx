@@ -24,6 +24,15 @@ interface Pricing {
   price_buckets?: { price: number; count: number }[];
 }
 
+interface OwnerSettings {
+  base_price: number;
+  weekend_price: number;
+  cleaning_fee: number;
+  service_fee: number;
+  discount_weekly: number;
+  discount_monthly: number;
+}
+
 export const BookingCalendar = () => {
   const navigate = useNavigate();
   const [checkIn, setCheckIn] = useState<Date>();
@@ -37,6 +46,12 @@ export const BookingCalendar = () => {
   const [monthsCount, setMonthsCount] = useState(1);
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
+  const [busySet, setBusySet] = useState<Set<string>>(new Set());
+  const [ownerSettings, setOwnerSettings] = useState<OwnerSettings | null>(null);
+  const busyDates = Array.from(busySet).map((s) => {
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  });
 
   // Check authentication on mount
   useEffect(() => {
@@ -62,6 +77,98 @@ export const BookingCalendar = () => {
     updateMonths();
     window.addEventListener("resize", updateMonths);
     return () => window.removeEventListener("resize", updateMonths);
+  }, []);
+
+  useEffect(() => {
+    const API = "http://localhost:3005";
+    fetch(`${API}/settings/public`).then(async (res) => {
+      if (!res.ok) return;
+      const j = await res.json();
+      const s = j.settings || {};
+      setOwnerSettings({
+        base_price: Number(s.base_price || 0),
+        weekend_price: Number(s.weekend_price || 0),
+        cleaning_fee: Number(s.cleaning_fee || 0),
+        service_fee: Number(s.service_fee || 0),
+        discount_weekly: Number(s.discount_weekly || 0),
+        discount_monthly: Number(s.discount_monthly || 0),
+      });
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const API = "http://localhost:3005";
+    let cancelled = false;
+    const parseIcsDate = (value: string): Date => {
+      if (/^\d{8}$/.test(value)) {
+        const y = Number(value.slice(0, 4));
+        const m = Number(value.slice(4, 6)) - 1;
+        const d = Number(value.slice(6, 8));
+        return new Date(y, m, d);
+      }
+      if (/^\d{8}T\d{6}Z$/.test(value)) {
+        const y = Number(value.slice(0, 4));
+        const m = Number(value.slice(4, 6)) - 1;
+        const d = Number(value.slice(6, 8));
+        return new Date(y, m, d);
+      }
+      return new Date(value);
+    };
+    const parseICSEvents = (icsText: string): { date: string; type: 'reservation' | 'block' | 'ical'; source?: string }[] => {
+      const events: { date: string; type: 'reservation' | 'block' | 'ical'; source?: string }[] = [];
+      const lines = icsText.split(/\r?\n/);
+      let current: { dtstart?: Date; dtend?: Date; summary?: string; categories?: string } = {};
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (line.startsWith('BEGIN:VEVENT')) { current = {}; continue; }
+        if (line.startsWith('DTSTART')) { const [, val] = line.split(':'); current.dtstart = parseIcsDate(val); continue; }
+        if (line.startsWith('DTEND')) { const [, val] = line.split(':'); current.dtend = parseIcsDate(val); continue; }
+        if (line.startsWith('SUMMARY')) { const [, val] = line.split(':'); current.summary = val; continue; }
+        if (line.startsWith('CATEGORIES')) { const [, val] = line.split(':'); current.categories = val; continue; }
+        if (line.startsWith('END:VEVENT')) {
+          if (current.dtstart && current.dtend) {
+            const inclusiveEnd = new Date(current.dtend); inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
+            const cur = new Date(current.dtstart);
+            let type: 'reservation' | 'block' | 'ical' = 'reservation';
+            let source = current.categories || 'Site';
+            let color = '#10b981';
+            const cat = (current.categories || '').toLowerCase();
+            const sum = (current.summary || '').toLowerCase();
+            if (cat.includes('block')) { type = 'block'; color = '#ef4444'; }
+            else if (cat.includes('airbnb')) { source = 'Airbnb'; color = '#f59e0b'; }
+            else if (cat.includes('booking')) { source = 'Booking.com'; color = '#3b82f6'; }
+            else {
+              if (sum.includes('airbnb')) { source = 'Airbnb'; color = '#f59e0b'; }
+              else if (sum.includes('booking')) { source = 'Booking.com'; color = '#3b82f6'; }
+            }
+            while (cur <= inclusiveEnd) {
+              const dateStr = format(cur, 'yyyy-MM-dd');
+              events.push({ date: dateStr, type, source });
+              cur.setDate(cur.getDate() + 1);
+            }
+          }
+          current = {};
+          continue;
+        }
+      }
+      return events;
+    };
+    const loadICS = async () => {
+      try {
+        const res = await fetch(`${API}/calendar/merged.ics?t=${Date.now()}`);
+        if (!res.ok) return;
+        const icsText = await res.text();
+        const events = parseICSEvents(icsText);
+        const next = new Set<string>();
+        for (const ev of events) { next.add(ev.date); }
+        if (!cancelled) setBusySet(next);
+      } catch (_) { /* ignore */ }
+    };
+    loadICS();
+    const handler = () => { void loadICS(); };
+    document.addEventListener('ical:updated', handler as EventListener);
+    const id = window.setInterval(() => { void loadICS(); }, 10 * 60 * 1000);
+    return () => { cancelled = true; document.removeEventListener('ical:updated', handler as EventListener); window.clearInterval(id); };
   }, []);
 
   useEffect(() => {
@@ -161,8 +268,12 @@ export const BookingCalendar = () => {
         }),
       });
       if (res.ok) {
+        const j = await res.json();
+        const bid = String(j.id || "");
+        const tok = String(j.token || "");
+        if (tok) { localStorage.setItem("token", tok); }
         created = {
-          id: `srv-${Date.now()}`,
+          id: bid || `srv-${Date.now()}`,
           status: "pending",
           check_in: checkIn.toISOString().split("T")[0],
           check_out: checkOut.toISOString().split("T")[0],
@@ -212,25 +323,48 @@ export const BookingCalendar = () => {
                 mode="range"
                 selected={{ from: checkIn, to: checkOut }}
                 onSelect={(range) => {
-                  setCheckIn(range?.from);
-                  setCheckOut(range?.to);
+                  const from = range?.from;
+                  const to = range?.to;
+                  if (!from || !to) { setCheckIn(from); setCheckOut(to); return; }
+                  const cur = new Date(from);
+                  let valid = true;
+                  while (cur <= to) {
+                    const key = format(cur, 'yyyy-MM-dd');
+                    if (busySet.has(key)) { valid = false; break; }
+                    cur.setDate(cur.getDate() + 1);
+                  }
+                  if (!valid) { toast.error('Intervalo inclui datas ocupadas'); return; }
+                  setCheckIn(from);
+                  setCheckOut(to);
                 }}
-                disabled={(date) => date < new Date()}
+                disabled={(date) => {
+                  const today = new Date();
+                  today.setHours(0,0,0,0);
+                  const key = format(date, 'yyyy-MM-dd');
+                  return date < today || busySet.has(key);
+                }}
+                modifiers={{ busy: busyDates, weekend: { daysOfWeek: [0, 6] } }}
+                modifiersClassNames={{ busy: 'bg-red-50 text-red-600 !opacity-100', weekend: 'bg-accent/30' }}
                 showOutsideDays
                 numberOfMonths={monthsCount}
-                className="w-full max-w-full"
+                className="w-full max-w-full p-2 md:p-3"
                 classNames={{
-                  months: "flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full",
-                  month: "space-y-3",
-                  table: "w-full border-collapse",
-                  head_row: "grid grid-cols-7",
-                  caption_label: "text-base md:text-lg font-semibold",
-                  head_cell: "text-muted-foreground truncate font-normal text-[0.75rem] md:text-[0.8rem]",
-                  row: "grid grid-cols-7 w-full mt-2",
-                  cell: "aspect-square w-full text-center text-xs md:text-sm p-0 relative",
-                  day: "w-full h-full p-0 font-normal",
+                  months: 'flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full',
+                  month: 'space-y-4',
+                  table: 'w-full border-collapse',
+                  head_row: 'grid grid-cols-7',
+                  caption_label: 'text-lg md:text-xl font-bold tracking-tight',
+                  head_cell: 'text-muted-foreground truncate font-medium text-[0.8rem]',
+                  row: 'grid grid-cols-7 w-full mt-2',
+                  cell: 'aspect-square w-full text-center text-sm p-0 relative rounded-lg overflow-hidden',
+                  day: 'w-full h-full p-0 font-medium',
                 }}
               />
+              <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-red-50 border border-red-200" /> Ocupado</div>
+                <div className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-accent/30 border border-accent" /> Fim de semana</div>
+                <div className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded bg-accent/60" /> Selecionado</div>
+              </div>
             </CardContent>
           </Card>
 
@@ -360,6 +494,40 @@ export const BookingCalendar = () => {
                     <span className="text-base md:text-lg font-semibold">Total:</span>
                     <span className="flex-1 text-right truncate text-2xl md:text-3xl font-extrabold text-gradient">{formatBRL(pricing.total)}</span>
                   </div>
+                </div>
+              )}
+              {!calculatingPrice && !pricing && ownerSettings && (
+                <div className="p-4 bg-primary/10 rounded-lg space-y-2">
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>Diária base:</span>
+                    <span className="font-medium">{formatBRL(ownerSettings.base_price)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>Diária fim de semana:</span>
+                    <span className="font-medium">{formatBRL(ownerSettings.weekend_price)}</span>
+                  </div>
+                  {(ownerSettings.cleaning_fee > 0 || ownerSettings.service_fee > 0) && (
+                    <>
+                      {ownerSettings.cleaning_fee > 0 && (
+                        <div className="flex justify-between text-sm text-muted-foreground">
+                          <span>Taxa de limpeza:</span>
+                          <span className="font-medium">{formatBRL(ownerSettings.cleaning_fee)}</span>
+                        </div>
+                      )}
+                      {ownerSettings.service_fee > 0 && (
+                        <div className="flex justify-between text-sm text-muted-foreground">
+                          <span>Taxa de serviço:</span>
+                          <span className="font-medium">{formatBRL(ownerSettings.service_fee)}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {(ownerSettings.discount_weekly > 0 || ownerSettings.discount_monthly > 0) && (
+                    <div className="flex justify-between text-sm text-green-700">
+                      <span>Descontos:</span>
+                      <span className="font-medium">{ownerSettings.discount_weekly > 0 ? `${ownerSettings.discount_weekly}% semanal` : ''}{ownerSettings.discount_monthly > 0 ? `${ownerSettings.discount_weekly > 0 ? ' • ' : ''}${ownerSettings.discount_monthly}% mensal` : ''}</span>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import {
   Popover,
@@ -26,6 +26,7 @@ import casaVideo from '@/assets/videos/video-casa.mp4';
 
 export default function MyBooking() {
   const navigate = useNavigate();
+  const location = useLocation();
   type Booking = {
     id: string;
     status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
@@ -55,13 +56,15 @@ export default function MyBooking() {
   const [clientSecret, setClientSecret] = useState('');
   const [isPaying, setIsPaying] = useState(false);
   const paymentContainerRef = useRef<HTMLDivElement | null>(null);
-  const stripeRef = useRef<any>(null);
-  const elementsRef = useRef<any>(null);
+  const stripeRef = useRef<unknown>(null);
+  const elementsRef = useRef<unknown>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const [paymentInvite, setPaymentInvite] = useState<{ pt?: string; bookingId?: string } | null>(null);
+  const navBooking = (location.state as LocationState | null)?.booking || null;
 
   const loadStripeScript = async () => {
-    if ((window as any).Stripe) return;
+    const hasStripe = (window as unknown as { Stripe?: unknown }).Stripe;
+    if (hasStripe) return;
     await new Promise<void>((resolve, reject) => {
       const s = document.createElement('script');
       s.src = 'https://js.stripe.com/v3';
@@ -80,7 +83,7 @@ export default function MyBooking() {
       const params = new URLSearchParams(window.location.search);
       const pt = params.get('pt');
       let url = `${API}/bookings/${booking.id}/payment-intent`;
-      let headers: any = {};
+      const headers: Record<string, string> = {};
       if (pt) { url += `?pt=${encodeURIComponent(pt)}`; }
       else {
         if (!token) { toast.error('Faça login'); return; }
@@ -102,8 +105,9 @@ export default function MyBooking() {
       setPublishableKey(String(j.publishable_key || ''));
       setClientSecret(String(j.client_secret || ''));
       await loadStripeScript();
-      const stripe = (window as any).Stripe(String(j.publishable_key || ''));
-      const elements = stripe.elements({ clientSecret: String(j.client_secret || '') });
+      const w = window as unknown as { Stripe: (key: string) => unknown };
+      const stripe = w.Stripe(String(j.publishable_key || '')) as unknown as { elements: (opts: { clientSecret: string }) => unknown };
+      const elements = (stripe.elements({ clientSecret: String(j.client_secret || '') }) as unknown) as { create: (type: string) => { mount: (el: HTMLElement) => void } };
       const paymentElement = elements.create('payment');
       stripeRef.current = stripe;
       elementsRef.current = elements;
@@ -111,7 +115,7 @@ export default function MyBooking() {
       setTimeout(() => {
         if (paymentContainerRef.current) { paymentContainerRef.current.innerHTML = ''; paymentElement.mount(paymentContainerRef.current); }
       }, 0);
-    } catch {
+    } catch (_e) {
       toast.error('Falha ao iniciar pagamento');
     }
   };
@@ -149,7 +153,7 @@ export default function MyBooking() {
     const res = await fetch(`${API}/bookings/mine`, { headers: { Authorization: `Bearer ${token}` } });
     if (res.ok) {
       const j = await res.json();
-      const rows = (j.data || []) as any[];
+      const rows = (j.data || []) as Array<Record<string, unknown>>;
       const mapped: Booking[] = rows.map((raw) => ({
         id: String(raw.ID ?? raw.id ?? ''),
         status: ((): Booking['status'] => {
@@ -196,6 +200,13 @@ export default function MyBooking() {
     }
     setLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (navBooking) {
+      setBooking(navBooking);
+      setLoading(false);
+    }
+  }, [navBooking]);
 
   useEffect(() => {
     loadBookingAndMessages();
@@ -509,9 +520,9 @@ export default function MyBooking() {
                   </p>
                 ) : (
                   messages.map((msg) => {
-                    let special: any = null;
-                    try { special = JSON.parse(msg.message); } catch {}
-                    const isPayment = special && special.type === 'payment_invite';
+                    let special: Record<string, unknown> | null = null;
+                    try { special = JSON.parse(msg.message) as Record<string, unknown>; } catch (_e) { special = null; }
+                    const isPayment = Boolean(special && (special as Record<string, unknown>).type === 'payment_invite');
                     const isOwnerMsg = Boolean(msg.is_from_owner);
                     return (
                       <div key={msg.id} className={`flex items-end gap-2 ${isOwnerMsg ? 'justify-end' : 'justify-start'}`}>
@@ -521,9 +532,9 @@ export default function MyBooking() {
                         <div className={`max-w-[85%] sm:max-w-[70%] px-3 py-2 rounded-2xl text-xs sm:text-sm shadow ${isOwnerMsg ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-accent text-accent-foreground rounded-bl-sm'}`}>
                           {isPayment ? (
                             <div className='space-y-3'>
-                              <div className='font-medium'>{String(special.text || '')}</div>
+                              <div className='font-medium'>{String((special as Record<string, unknown>).text ?? '')}</div>
                               <Button onClick={handlePay} className='w-full' variant='gradient'>
-                                {String(special.cta || 'Pagar agora')}
+                                {String((special as Record<string, unknown>).cta ?? 'Pagar agora')}
                               </Button>
                             </div>
                           ) : (

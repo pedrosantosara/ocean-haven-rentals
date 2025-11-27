@@ -87,7 +87,7 @@ export default function Chat() {
     if (!bookingId) return;
     const token = localStorage.getItem('token');
     if (!token) { toast.error('Faça login como proprietário'); return; }
-    const res = await fetch(`${API}/bookings/${bookingId}/reject`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${API}/bookings/${bookingId}/cancel`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) { toast.error('Erro ao cancelar'); return; }
     toast.success('Reserva cancelada');
     await loadBooking();
@@ -238,9 +238,9 @@ export default function Chat() {
                 {messages.map((m) => {
                   const isOwnerMsg = Boolean(m.is_from_owner);
                   const initials = getInitials(isOwnerMsg ? (localStorage.getItem('owner_name') || m.sender_email || 'Você') : (booking?.guest_name || m.sender_email || 'Hóspede'));
-                  let special: any = null;
-                  try { special = JSON.parse(m.message); } catch {}
-                  const isPaymentInvite = special && special.type === 'payment_invite';
+                  let special: Record<string, unknown> | null = null;
+                  try { special = JSON.parse(m.message) as Record<string, unknown>; } catch (_e) { special = null; }
+                  const isPaymentInvite = Boolean(special && (special as Record<string, unknown>).type === 'payment_invite');
                   return (
                     <div key={m.id} className={`flex items-end gap-2 ${isOwnerMsg ? 'justify-end' : 'justify-start'}`}>
                       {!isOwnerMsg && (
@@ -249,9 +249,9 @@ export default function Chat() {
                       <div className={`max-w-[85%] sm:max-w-[70%] px-3 py-2 rounded-2xl text-xs sm:text-sm shadow ${isOwnerMsg ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-accent text-accent-foreground rounded-bl-sm'}`}>
                         {isPaymentInvite ? (
                           <div className='space-y-3'>
-                            <div className='font-medium'>{String(special.text || '')}</div>
+                            <div className='font-medium'>{String((special as Record<string, unknown>).text ?? '')}</div>
                             <Button size='sm' variant='gradient' disabled className='opacity-90 cursor-not-allowed'>
-                              {String(special.cta || 'Pagar agora')}
+                              {String((special as Record<string, unknown>).cta ?? 'Pagar agora')}
                             </Button>
                           </div>
                         ) : (

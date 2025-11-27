@@ -51,17 +51,22 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
 
       if (res.ok) {
         const data = await res.json();
-        const reservations = (data.data || []).map((r: { ID?: string; id?: string; GuestName?: string; guest_name?: string; CheckIn?: string; check_in?: string; CheckOut?: string; check_out?: string; Status?: string; status?: string }) => ({
-          id: r.ID || r.id || '',
-          date: r.CheckIn || r.check_in || '',
-          type: 'reservation' as const,
-          source: 'Site' as const,
-          guestName: r.GuestName || r.guest_name || '',
-          status: r.Status || r.status || '',
-          color: '#10b981', // green for site
-          startDate: r.CheckIn || r.check_in || '',
-          endDate: r.CheckOut || r.check_out || ''
-        }));
+        const reservations = (data.data || [])
+          .filter((r: { Status?: string; status?: string }) => {
+            const st = String(r.Status || r.status || '').toLowerCase();
+            return st !== 'rejected' && st !== 'cancelled';
+          })
+          .map((r: { ID?: string; id?: string; GuestName?: string; guest_name?: string; CheckIn?: string; check_in?: string; CheckOut?: string; check_out?: string; Status?: string; status?: string }) => ({
+            id: r.ID || r.id || '',
+            date: r.CheckIn || r.check_in || '',
+            type: 'reservation' as const,
+            source: 'Site' as const,
+            guestName: r.GuestName || r.guest_name || '',
+            status: r.Status || r.status || '',
+            color: '#10b981',
+            startDate: r.CheckIn || r.check_in || '',
+            endDate: r.CheckOut || r.check_out || ''
+          }));
         allEvents.push(...reservations);
       }
 
