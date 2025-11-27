@@ -264,79 +264,87 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
       {/* Calendar Grid */}
       <div className="p-6">
         <div className="bg-white rounded-xl shadow-sm border border-zinc-200 overflow-hidden">
-          {/* Week Days Header */}
-          <div className="grid grid-cols-7 bg-zinc-50 border-b border-zinc-200">
-            {weekDays.map(day => (
-              <div key={day} className="py-3 md:p-3 text-center text-sm md:text-xs font-medium text-zinc-600">
-                {day}
-              </div>
-            ))}
-          </div>
-
-          {/* Calendar Days */}
-          <div className="grid grid-cols-7">
-            {/* Padding for first week */}
-            {padding.map(i => (
-              <div key={`pad-${i}`} className="h-40 md:h-32 border-r border-b border-zinc-100 bg-zinc-50"></div>
-            ))}
-
-            {/* Days */}
-            {days.map(day => {
-              const dayEvents = getEventsForDate(day);
-              const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
-
-              return (
-                <div key={day} className={`h-40 md:h-32 border-r border-b border-zinc-100 p-3 md:p-2 relative group hover:bg-zinc-50 transition-colors ${isToday ? 'bg-blue-50' : ''
-                  }`}>
-                  <div className="flex justify-between items-start mb-1">
-                    <span className={`text-base md:text-sm font-medium ${isToday ? 'text-blue-600 bg-blue-100 w-6 h-6 flex items-center justify-center rounded-full' : 'text-zinc-900'
-                      }`}>
-                      {day}
-                    </span>
-                    {dayEvents.length > 0 && (
-                      <span className="text-sm md:text-xs bg-zinc-200 text-zinc-700 px-1.5 py-0.5 rounded-full">
-                        {dayEvents.length}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Events */}
-                  <div className="space-y-1">
-                    {dayEvents.slice(0, 3).map((event, idx) => (
-                      <div
-                        key={idx}
-                        className="px-1.5 py-0.5 text-[11px] md:text-[10px] rounded truncate cursor-pointer hover:opacity-80 transition-opacity"
-                        style={{
-                          backgroundColor: event.color + '20',
-                          color: event.color,
-                          borderLeft: `2px solid ${event.color}`
-                        }}
-                        onClick={() => setSelectedEvent(event)}
-                      >
-                        {event.guestName || event.source}
-                      </div>
-                    ))}
-                    {dayEvents.length > 3 && (
-                      <div className="text-[11px] md:text-[10px] text-zinc-500 px-1.5">
-                        +{dayEvents.length - 3} mais
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Add Event Button */}
-                  <button
-                    className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 md:w-5 md:h-5 bg-zinc-200 hover:bg-zinc-300 rounded-full flex items-center justify-center text-zinc-600"
-                    onClick={() => {
-                      // Open add event modal
-                      const date = new Date(year, month, day);
-                      console.log('Add event for:', date);
-                    }}
-                  >
-                    <Plus className="w-4 h-4 md:w-3 md:h-3" />
-                  </button>
+          <div className="p-6 md:p-5 overflow-hidden">
+            {/* Week Days Header */}
+            <div className="grid grid-cols-7 text-center mb-2 hidden md:grid">
+              {weekDays.map(day => (
+                <div key={day} className="text-sm md:text-xs text-zinc-400 font-medium py-3 md:py-2">
+                  {day}
                 </div>
-              );
-            })}
+              ))}
+            </div>
+
+            {/* Calendar Days */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-1 text-sm">
+              {/* Padding for first week */}
+              {padding.map(i => (
+                <div key={`pad-${i}`} className="h-36 md:h-28 p-2 border border-transparent rounded-lg text-zinc-300 hidden md:block"></div>
+              ))}
+
+              {/* Days */}
+              {days.map(day => {
+                const dayEvents = getEventsForDate(day);
+                const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
+                const weekDayName = format(new Date(year, month, day), 'EEE', { locale: ptBR });
+
+                return (
+                  <div key={day} className={`h-36 md:h-28 p-3 md:p-2 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors relative group cursor-pointer ${isToday ? 'bg-blue-50/30' : ''}`}>
+                    <div className="flex justify-between items-start mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-base md:text-sm font-medium ${isToday ? 'text-blue-600 bg-blue-100 w-7 h-7 flex items-center justify-center rounded-full' : 'text-zinc-700'}`}>
+                          {day}
+                        </span>
+                        <span className="md:hidden text-xs text-zinc-400 uppercase font-medium">{weekDayName}</span>
+                      </div>
+                      {dayEvents.length > 0 && (
+                        <span className="text-sm md:text-xs bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded-full">
+                          {dayEvents.length}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Events */}
+                    <div className="space-y-1 mt-1">
+                      {dayEvents.slice(0, 3).map((event, idx) => (
+                        <div
+                          key={idx}
+                          className="px-1.5 py-0.5 text-[11px] md:text-[10px] rounded truncate cursor-pointer hover:opacity-80 transition-opacity"
+                          style={{
+                            backgroundColor: event.color + '20',
+                            color: event.color,
+                            borderLeft: `2px solid ${event.color}`
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedEvent(event);
+                          }}
+                        >
+                          {event.guestName || event.source}
+                        </div>
+                      ))}
+                      {dayEvents.length > 3 && (
+                        <div className="text-[11px] md:text-[10px] text-zinc-500 px-1.5">
+                          +{dayEvents.length - 3} mais
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Add Event Button */}
+                    <button
+                      className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 md:w-5 md:h-5 bg-zinc-200 hover:bg-zinc-300 rounded-full flex items-center justify-center text-zinc-600"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Open add event modal
+                        const date = new Date(year, month, day);
+                        console.log('Add event for:', date);
+                      }}
+                    >
+                      <Plus className="w-4 h-4 md:w-3 md:h-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 

@@ -242,7 +242,7 @@ export const NewDashboard: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mt-8">
+      <div className="grid grid-cols-1 gap-12 mt-8">
         <div className="bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-zinc-200 flex items-center justify-between">
             <h2 className="font-medium text-zinc-900">{monthNames[month]} {year}</h2>
@@ -255,22 +255,26 @@ export const NewDashboard: React.FC = () => {
               </button>
             </div>
           </div>
-          <div className="p-6 md:p-5">
-            <div className="grid grid-cols-7 text-center mb-2">
+          <div className="p-6 md:p-5 overflow-hidden">
+            <div className="grid grid-cols-7 text-center mb-2 hidden md:grid">
               {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => (
                 <div key={d} className="text-sm md:text-xs text-zinc-400 font-medium py-3 md:py-2">{d}</div>
               ))}
             </div>
-            <div className="grid grid-cols-7 gap-1 text-sm">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-1 text-sm">
               {padding.map(i => (
-                <div key={`pad-${i}`} className="h-36 md:h-28 p-2 border border-transparent rounded-lg text-zinc-300"></div>
+                <div key={`pad-${i}`} className="h-36 md:h-28 p-2 border border-transparent rounded-lg text-zinc-300 hidden md:block"></div>
               ))}
               {days.map(day => {
                 const events = getEventsForDate(day);
                 const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
+                const weekDayName = format(new Date(year, month, day), 'EEE', { locale: ptBR });
                 return (
                   <div key={day} className={`h-36 md:h-28 p-3 md:p-2 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors relative group cursor-pointer ${isToday ? 'bg-blue-50/30' : ''}`}>
-                    <span className={`text-base md:text-sm font-medium ${isToday ? 'text-blue-600 bg-blue-100 w-7 h-7 flex items-center justify-center rounded-full' : 'text-zinc-700'}`}>{day}</span>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-base md:text-sm font-medium ${isToday ? 'text-blue-600 bg-blue-100 w-7 h-7 flex items-center justify-center rounded-full' : 'text-zinc-700'}`}>{day}</span>
+                      <span className="md:hidden text-xs text-zinc-400 uppercase font-medium">{weekDayName}</span>
+                    </div>
                     {events.map((event, idx) => (
                       <div key={idx} className="mt-1 px-1.5 py-0.5 text-[11px] md:text-[10px] rounded truncate" style={{ backgroundColor: (event.color || '#000') + '20', color: event.color || '#000', borderLeft: `2px solid ${event.color || '#000'}` }}>
                         {event.guestName || event.source}
@@ -283,7 +287,7 @@ export const NewDashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="space-y-6 mt-6 lg:mt-0">
+        <div className="space-y-6">
           {pendingReservations.length === 0 ? (
             <div className="bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
               <div className="p-4 bg-amber-50/50 border-b border-zinc-200/60 flex items-center justify-between">
