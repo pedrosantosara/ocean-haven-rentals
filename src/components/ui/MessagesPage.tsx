@@ -220,25 +220,10 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
   }
 
   return (
-    <div className="">
-      {/* Header */}
-      <div className="bg-white border-b border-zinc-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-zinc-900">Mensagens</h1>
-            <p className="text-sm text-zinc-500 mt-1">Converse com seus hóspedes</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button className="p-2 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors">
-              <MessageSquare className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex h-[calc(100vh-80px)]">
+    <div className="h-full">
+      <div className="flex h-full">
         {/* Sidebar - Bookings List */}
-        <div className="w-80 bg-white border-r border-zinc-200 overflow-y-auto">
+        <div className={`w-full md:w-80 bg-white border-r border-zinc-200 overflow-y-auto ${selectedBooking ? 'hidden md:block' : ''}`}>
           <div className="p-4 border-b border-zinc-200">
             <h2 className="text-lg font-semibold text-zinc-900">Conversas</h2>
             <p className="text-sm text-zinc-500">{bookings.length} reservas ativas</p>
@@ -284,7 +269,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
         </div>
 
         {/* Chat Area */}
-        <div className="flex-1 flex flex-col">
+        <div className={`flex-1 flex flex-col ${!selectedBooking ? 'hidden md:flex' : ''}`}>
           {selectedBooking ? (
             <>
               {/* Chat Header */}
@@ -293,7 +278,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                   <div className="flex items-center gap-4">
                     <button
                       onClick={() => setSelectedBooking(null)}
-                      className="p-2 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors lg:hidden"
+                      className="p-2 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors md:hidden"
                     >
                       <ChevronLeft className="w-5 h-5" />
                     </button>
@@ -305,14 +290,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                       <p className="text-sm text-zinc-500">{selectedBooking.guest_email}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button className="p-2 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors">
-                      <Phone className="w-5 h-5" />
-                    </button>
-                    <button className="p-2 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors">
-                      <Mail className="w-5 h-5" />
-                    </button>
-                  </div>
+
                 </div>
               </div>
 
@@ -342,9 +320,10 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                 {messages.map((msg) => {
                   const isHost = msg.is_from_owner;
                   const senderName = isHost ? 'Você' : selectedBooking.guest_name;
-                  let special: any = null;
-                  try { special = JSON.parse(msg.message); } catch {}
-                  const isPaymentInvite = special && special.type === 'payment_invite';
+                  interface PaymentInvite { type: 'payment_invite'; text?: string; cta?: string; checkout_url?: string }
+                  let special: PaymentInvite | null = null;
+                  try { special = JSON.parse(msg.message) as PaymentInvite; } catch { special = null; }
+                  const isPaymentInvite = Boolean(special && special.type === 'payment_invite');
 
                   return (
                     <div key={msg.id} className={`flex ${isHost ? 'justify-end' : 'justify-start'}`}>
@@ -363,9 +342,20 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
                             {isPaymentInvite ? (
                               <div className="space-y-2">
                                 <div className="font-medium">{String(special.text || '')}</div>
-                                <button className="w-full px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold opacity-90 cursor-not-allowed">
-                                  {String(special.cta || 'Pagar agora')}
-                                </button>
+                                {special && special.checkout_url ? (
+                                  <a
+                                    href={String(special.checkout_url)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center justify-center w-full px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold hover:bg-blue-700 transition-colors"
+                                  >
+                                    {String((special && special.cta) || 'Pagar agora')}
+                                  </a>
+                                ) : (
+                                  <button className="w-full px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-semibold opacity-90 cursor-not-allowed">
+                                    {String((special && special.cta) || 'Pagar agora')}
+                                  </button>
+                                )}
                               </div>
                             ) : (
                               msg.message

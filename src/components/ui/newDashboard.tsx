@@ -3,6 +3,10 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarDays, Link, Plus, TrendingUp, Home, Bell, ChevronLeft, ChevronRight, Send, User, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 interface Reservation {
   id: string;
@@ -38,10 +42,18 @@ export const NewDashboard: React.FC = () => {
   const [mCheckIn, setMCheckIn] = useState('');
   const [mCheckOut, setMCheckOut] = useState('');
   const [isCreating, setIsCreating] = useState(false);
-  const [basePrice, setBasePrice] = useState(500);
-  const [weekendPrice, setWeekendPrice] = useState(600);
+  const [basePrice, setBasePrice] = useState<number | ''>('');
+  const [weekendPrice, setWeekendPrice] = useState<number | ''>('');
   const navigate = useNavigate();
   const handleLogout = () => { localStorage.removeItem('token'); navigate('/auth'); };
+
+  const [datePrices, setDatePrices] = useState<Record<string, number>>({});
+  const [priceModalOpen, setPriceModalOpen] = useState(false);
+  const [selectedDateStr, setSelectedDateStr] = useState('');
+  const [datePriceInput, setDatePriceInput] = useState('');
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
+  const [bulkPriceInput, setBulkPriceInput] = useState('');
 
   const monthNames = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -61,6 +73,26 @@ export const NewDashboard: React.FC = () => {
     return () => { document.removeEventListener('ical:updated', handler as EventListener); window.clearInterval(id); };
   }, []);
 
+  useEffect(() => {
+    const API = 'http://localhost:3005';
+    const token = localStorage.getItem('token');
+    const y = currentDate.getFullYear();
+    const m = currentDate.getMonth();
+    const startStr = format(new Date(y, m, 1), 'yyyy-MM-dd');
+    const endStr = format(new Date(y, m + 1, 0), 'yyyy-MM-dd');
+    fetch(`${API}/date-prices?start=${startStr}&end=${endStr}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(res => res.ok ? res.json() : Promise.reject(new Error('failed')))
+      .then(data => {
+        const map: Record<string, number> = {};
+        (data.data || []).forEach((r: { date: string; Date?: string; price: number; Price?: number }) => {
+          const ds = (r.date || r.Date || '').split('T')[0];
+          if (ds) map[ds] = Number(r.price || r.Price || 0);
+        });
+        setDatePrices(map);
+      })
+      .catch(() => {});
+  }, [currentDate]);
+
   const loadDashboardData = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -69,7 +101,8 @@ export const NewDashboard: React.FC = () => {
       const res = await fetch(`${API}/bookings`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (res.ok) {
         const data = await res.json();
-        const mapped = (data.data || []).map((r: any) => ({
+        type BRec = { ID?: string; id?: string; GuestName?: string; guest_name?: string; GuestEmail?: string; guest_email?: string; CheckIn?: string; check_in?: string; CheckOut?: string; check_out?: string; Status?: string; status?: string; TotalPrice?: number; total_price?: number; NumberOfGuests?: number; number_of_guests?: number };
+        const mapped = (data.data || []).map((r: BRec) => ({
           id: r.ID || r.id || '',
           guestName: r.GuestName || r.guest_name || '',
           guestEmail: r.GuestEmail || r.guest_email || '',
@@ -94,8 +127,8 @@ export const NewDashboard: React.FC = () => {
       if (sRes.ok) {
         const j = await sRes.json();
         const s = j.settings || {};
-        setBasePrice(Number(s.base_price || basePrice));
-        setWeekendPrice(Number(s.weekend_price || weekendPrice));
+        setBasePrice(s.base_price !== undefined ? Number(s.base_price) : '');
+        setWeekendPrice(s.weekend_price !== undefined ? Number(s.weekend_price) : '');
       }
 
       const statsRes = await fetch(`${API}/stats/dashboard`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -215,10 +248,6 @@ export const NewDashboard: React.FC = () => {
             <Plus className="w-4 h-4" />
             Nova Reserva Manual
           </button>
-          <button className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white border border-zinc-200 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all shadow-sm" onClick={handleLogout}>
-            <LogOut className="w-4 h-4" />
-            Sair
-          </button>
         </div>
       </div>
 
@@ -246,7 +275,7 @@ export const NewDashboard: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mt-8">
+      <div className="grid grid-cols-1 gap-12 mt-8">
         <div className="bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-zinc-200 flex items-center justify-between">
             <h2 className="font-medium text-zinc-900">{monthNames[month]} {year}</h2>
@@ -257,24 +286,59 @@ export const NewDashboard: React.FC = () => {
               <button onClick={nextMonth} className="p-1 hover:bg-zinc-100 rounded text-zinc-500">
                 <ChevronRight className="w-4 h-4" />
               </button>
+              <button onClick={() => { setMultiSelect((v) => !v); setSelectedDays(new Set()); }} className="ml-2 px-2 py-1 text-xs border border-zinc-200 rounded text-zinc-600 hover:bg-zinc-100">
+                {multiSelect ? 'Editar múltiplos' : 'Selecionar dias'}
+              </button>
             </div>
           </div>
-          <div className="p-6 md:p-5">
-            <div className="grid grid-cols-7 text-center mb-2">
+          <div className="p-6 md:p-5 overflow-hidden">
+            <div className="grid grid-cols-7 text-center mb-2 hidden md:grid">
               {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => (
                 <div key={d} className="text-sm md:text-xs text-zinc-400 font-medium py-3 md:py-2">{d}</div>
               ))}
             </div>
-            <div className="grid grid-cols-7 gap-1 text-sm">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-1 text-sm">
               {padding.map(i => (
-                <div key={`pad-${i}`} className="h-36 md:h-28 p-2 border border-transparent rounded-lg text-zinc-300"></div>
+                <div key={`pad-${i}`} className="h-36 md:h-28 p-2 border border-transparent rounded-lg text-zinc-300 hidden md:block"></div>
               ))}
               {days.map(day => {
                 const events = getEventsForDate(day);
                 const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
+                const weekDayName = format(new Date(year, month, day), 'EEE', { locale: ptBR });
+                const ds = format(new Date(year, month, day), 'yyyy-MM-dd');
+                const isSelected = selectedDays.has(ds);
                 return (
-                  <div key={day} className={`h-36 md:h-28 p-3 md:p-2 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors relative group cursor-pointer ${isToday ? 'bg-blue-50/30' : ''}`}>
-                    <span className={`text-base md:text-sm font-medium ${isToday ? 'text-blue-600 bg-blue-100 w-7 h-7 flex items-center justify-center rounded-full' : 'text-zinc-700'}`}>{day}</span>
+                  <div
+                    key={day}
+                    className={`h-36 md:h-28 p-3 md:p-2 border ${isSelected ? 'border-blue-400 bg-blue-50/20' : 'border-zinc-100'} rounded-lg hover:border-zinc-200 transition-colors relative group cursor-pointer ${isToday ? 'bg-blue-50/30' : ''}`}
+                    onClick={() => {
+                      if (multiSelect) {
+                        setSelectedDays((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(ds)) next.delete(ds); else next.add(ds);
+                          return next;
+                        });
+                        return;
+                      }
+                      setSelectedDateStr(ds);
+                      const existing = datePrices[ds];
+                      setDatePriceInput(existing !== undefined ? String(existing) : '');
+                      setPriceModalOpen(true);
+                    }}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-base md:text-sm font-medium ${isToday ? 'text-blue-600 bg-blue-100 w-7 h-7 flex items-center justify-center rounded-full' : 'text-zinc-700'}`}>{day}</span>
+                      <span className="md:hidden text-xs text-zinc-400 uppercase font-medium">{weekDayName}</span>
+                    </div>
+                    {(() => {
+                      const price = datePrices[ds];
+                      if (price === undefined) return null;
+                      return (
+                        <div className="absolute top-1 right-1 text-[11px] md:text-[10px] bg-zinc-200 text-zinc-800 px-1.5 py-0.5 rounded">
+                          R$ {Number(price).toLocaleString('pt-BR')}
+                        </div>
+                      );
+                    })()}
                     {events.map((event, idx) => (
                       <div key={idx} className="mt-1 px-1.5 py-0.5 text-[11px] md:text-[10px] rounded truncate" style={{ backgroundColor: (event.color || '#000') + '20', color: event.color || '#000', borderLeft: `2px solid ${event.color || '#000'}` }}>
                         {event.guestName || event.source}
@@ -284,10 +348,45 @@ export const NewDashboard: React.FC = () => {
                 );
               })}
             </div>
+            {multiSelect && selectedDays.size > 0 && (
+              <div className="mt-4 p-4 bg-zinc-50 border border-zinc-200 rounded-lg flex items-center gap-3">
+                <div className="text-sm text-zinc-600">{selectedDays.size} dia(s) selecionado(s)</div>
+                <Input placeholder="Valor em reais" value={bulkPriceInput} onChange={(e) => setBulkPriceInput(e.target.value)} />
+                <Button
+                  onClick={async () => {
+                    const price = Number(bulkPriceInput);
+                    if (!isFinite(price)) { toast.error('Valor inválido'); return; }
+                    const API = 'http://localhost:3005';
+                    const token = localStorage.getItem('token');
+                    const dates = Array.from(selectedDays);
+                    const res = await fetch(`${API}/date-prices/bulk`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                      body: JSON.stringify({ Dates: dates, Price: price })
+                    });
+                    if (res.ok) {
+                      setDatePrices((prev) => {
+                        const next = { ...prev };
+                        dates.forEach((d) => { next[d] = price; });
+                        return next;
+                      });
+                      toast.success('Preços atualizados');
+                      setSelectedDays(new Set());
+                      setBulkPriceInput('');
+                    } else {
+                      toast.error('Erro ao atualizar preços');
+                    }
+                  }}
+                >
+                  Aplicar preço aos selecionados
+                </Button>
+                <Button variant="outline" onClick={() => setSelectedDays(new Set())}>Limpar seleção</Button>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="space-y-6 mt-6 lg:mt-0">
+        <div className="space-y-6">
           {pendingReservations.length === 0 ? (
             <div className="bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
               <div className="p-4 bg-amber-50/50 border-b border-zinc-200/60 flex items-center justify-between">
@@ -373,6 +472,70 @@ export const NewDashboard: React.FC = () => {
           )}
         </div>
       </div>
+
+      <Dialog open={priceModalOpen} onOpenChange={setPriceModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Preço do dia</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-sm text-zinc-500">{selectedDateStr}</div>
+            <Input
+              placeholder="Valor em reais"
+              value={datePriceInput}
+              onChange={(e) => setDatePriceInput(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            {selectedDateStr && datePrices[selectedDateStr] !== undefined && (
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  const API = 'http://localhost:3005';
+                  const token = localStorage.getItem('token');
+                  const res = await fetch(`${API}/date-prices/${selectedDateStr}`, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+                  if (res.ok) {
+                    setDatePrices((prev) => {
+                      const next = { ...prev };
+                      delete next[selectedDateStr];
+                      return next;
+                    });
+                    toast.success('Preço removido');
+                    setPriceModalOpen(false);
+                  } else {
+                    toast.error('Erro ao remover preço');
+                  }
+                }}
+              >
+                Remover preço
+              </Button>
+            )}
+            <Button
+              onClick={async () => {
+                if (!selectedDateStr) return;
+                const API = 'http://localhost:3005';
+                const token = localStorage.getItem('token');
+                const price = Number(datePriceInput);
+                if (!isFinite(price)) { toast.error('Valor inválido'); return; }
+                const res = await fetch(`${API}/date-prices`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                  body: JSON.stringify({ Date: selectedDateStr, Price: price })
+                });
+                if (res.ok) {
+                  setDatePrices((prev) => ({ ...prev, [selectedDateStr]: price }));
+                  toast.success('Preço atualizado');
+                  setPriceModalOpen(false);
+                } else {
+                  toast.error('Erro ao salvar preço');
+                }
+              }}
+            >
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
