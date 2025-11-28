@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Calendar } from '@/components/ui/calendar';
 import {
   Card,
@@ -45,6 +45,23 @@ interface OwnerSettings {
   discount_monthly: number;
 }
 
+const calendarClassNames = {
+  months:
+    'flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full',
+  month: 'space-y-4',
+  table: 'w-full border-collapse',
+  head_row: 'grid grid-cols-7',
+  caption_label: 'text-2xl md:text-3xl font-bold tracking-tight',
+  head_cell: 'text-muted-foreground truncate font-medium text-base md:text-lg',
+  row: 'grid grid-cols-7 w-full mt-2',
+  cell: 'w-full text-center text-base md:text-lg p-0 relative rounded md:rounded-sm overflow-hidden',
+  day: 'w-full h-full p-0 font-medium text-base md:text-lg py-2 md:py-3',
+};
+const calendarModifiersClassNames = {
+  busy: 'bg-red-50 text-red-600 !opacity-100',
+  weekend: 'bg-accent/30',
+};
+
 export const BookingCalendar = () => {
   const navigate = useNavigate();
   const [checkIn, setCheckIn] = useState<Date>();
@@ -55,6 +72,8 @@ export const BookingCalendar = () => {
   const [numberOfGuests, setNumberOfGuests] = useState(1);
   const [loading, setLoading] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [discountsOpen, setDiscountsOpen] = useState(false);
   const [monthsCount, setMonthsCount] = useState(1);
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
@@ -62,10 +81,12 @@ export const BookingCalendar = () => {
   const [ownerSettings, setOwnerSettings] = useState<OwnerSettings | null>(
     null
   );
-  const busyDates = Array.from(busySet).map((s) => {
-    const [y, m, d] = s.split('-').map(Number);
-    return new Date(y, m - 1, d);
-  });
+  const busyDates = useMemo(() => {
+    return Array.from(busySet).map((s) => {
+      const [y, m, d] = s.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    });
+  }, [busySet]);
 
   // Check authentication on mount
   useEffect(() => {
@@ -81,13 +102,18 @@ export const BookingCalendar = () => {
         .then((data) => {
           if (data.user) {
             setIsAuthenticated(true);
+            const flag = data.user.is_owner;
+            setIsOwner(flag === true || flag === 1 || flag === '1');
             if (data.user.full_name) setGuestName(data.user.full_name);
             if (data.user.email) setGuestEmail(data.user.email);
           }
         })
         .catch(() => setIsAuthenticated(false));
     }
-    const updateMonths = () => setMonthsCount(window.innerWidth >= 768 ? 2 : 1);
+    const updateMonths = () => {
+      const w = window.innerWidth;
+      setMonthsCount(w >= 768 ? 2 : 1);
+    };
     updateMonths();
     window.addEventListener('resize', updateMonths);
     return () => window.removeEventListener('resize', updateMonths);
@@ -182,25 +208,19 @@ export const BookingCalendar = () => {
             const cur = new Date(current.dtstart);
             let type: 'reservation' | 'block' | 'ical' = 'reservation';
             let source = current.categories || 'Site';
-            let color = '#10b981';
             const cat = (current.categories || '').toLowerCase();
             const sum = (current.summary || '').toLowerCase();
             if (cat.includes('block')) {
               type = 'block';
-              color = '#ef4444';
             } else if (cat.includes('airbnb')) {
               source = 'Airbnb';
-              color = '#f59e0b';
             } else if (cat.includes('booking')) {
               source = 'Booking.com';
-              color = '#3b82f6';
             } else {
               if (sum.includes('airbnb')) {
                 source = 'Airbnb';
-                color = '#f59e0b';
               } else if (sum.includes('booking')) {
                 source = 'Booking.com';
-                color = '#3b82f6';
               }
             }
             while (cur <= inclusiveEnd) {
@@ -293,6 +313,10 @@ export const BookingCalendar = () => {
   };
 
   const handleBooking = async () => {
+    if (isOwner) {
+      toast.error('Conta proprietária não pode criar reserva');
+      return;
+    }
     if (!checkIn || !checkOut) {
       toast.error('Selecione as datas de check-in e check-out');
       return;
@@ -407,16 +431,52 @@ export const BookingCalendar = () => {
 
   return (
     <section id='book' className='py-20 px-4'>
-      <div className='container mx-auto rounded-xl border border-primary/20 bg-card/40 pb-6 pt-6 shadow-ocean'>
+      <div className='mx-auto max-w-screen-2xl rounded-xl border border-primary/20 bg-card/40 pb-6 pt-6 shadow-ocean'>
         <h2 className='text-4xl font-bold text-center mb-12 text-gradient'>
           Reserve Sua Estadia
         </h2>
 
-        <div className='grid md:grid-cols-[70%_30%] gap-8 w-full mx-auto'>
+        <div className='grid md:grid-cols-[1fr_380px] xl:grid-cols-[1fr_420px] gap-8 w-full mx-auto'>
           <Card className='glass-ocean border-primary/20 h-full'>
             <CardHeader>
-              <CardTitle>Selecione as Datas</CardTitle>
+              <div className='flex items-center justify-between gap-2'>
+                <CardTitle>
+                  Selecione as datas para desfrutar do paraíso!
+                </CardTitle>
+                <button
+                  type='button'
+                  onClick={() => setDiscountsOpen((v) => !v)}
+                  aria-expanded={discountsOpen}
+                  className='px-2 py-1 rounded-full border border-green-200 bg-green-50 text-green-700 text-xs hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-300'
+                >
+                  Aproveite nossos descontos
+                </button>
+              </div>
               <CardDescription>Escolha check-in e check-out</CardDescription>
+              {discountsOpen && (
+                <div className='mt-3 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-zinc-800'>
+                  {ownerSettings ? (
+                    <ul className='space-y-1'>
+                      <li>
+                        Desconto semanal:{' '}
+                        {ownerSettings.discount_weekly
+                          ? `${ownerSettings.discount_weekly}%`
+                          : '—'}
+                      </li>
+                      <li>
+                        Desconto mensal:{' '}
+                        {ownerSettings.discount_monthly
+                          ? `${ownerSettings.discount_monthly}%`
+                          : '—'}
+                      </li>
+                    </ul>
+                  ) : (
+                    <p className='text-sm text-zinc-700'>
+                      Carregando descontos…
+                    </p>
+                  )}
+                </div>
+              )}
             </CardHeader>
             <CardContent className='p-4 overflow-x-hidden'>
               <Calendar
@@ -454,26 +514,11 @@ export const BookingCalendar = () => {
                   return date < today || busySet.has(key);
                 }}
                 modifiers={{ busy: busyDates, weekend: { daysOfWeek: [0, 6] } }}
-                modifiersClassNames={{
-                  busy: 'bg-red-50 text-red-600 !opacity-100',
-                  weekend: 'bg-accent/30',
-                }}
+                modifiersClassNames={calendarModifiersClassNames}
                 showOutsideDays
                 numberOfMonths={monthsCount}
-                className='w-full max-w-full p-2 md:p-3'
-                classNames={{
-                  months:
-                    'flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full',
-                  month: 'space-y-4',
-                  table: 'w-full border-collapse',
-                  head_row: 'grid grid-cols-7',
-                  caption_label: 'text-lg md:text-xl font-bold tracking-tight',
-                  head_cell:
-                    'text-muted-foreground truncate font-medium text-[0.8rem]',
-                  row: 'grid grid-cols-7 w-full mt-2',
-                  cell: 'aspect-square w-full text-center text-sm p-0 relative rounded-lg overflow-hidden',
-                  day: 'w-full h-full p-0 font-medium',
-                }}
+                className='w-full max-w-full p-0 md:p-1'
+                classNames={calendarClassNames}
               />
               <div className='mt-3 flex items-center gap-3 text-xs text-muted-foreground'>
                 <div className='flex items-center gap-1'>
@@ -719,7 +764,7 @@ export const BookingCalendar = () => {
                 onClick={handleBooking}
                 className='w-full'
                 variant='gradient'
-                disabled={loading || calculatingPrice || !pricing}
+                disabled={loading || calculatingPrice || !pricing || isOwner}
               >
                 {loading ? 'Processando...' : 'Confirmar Reserva'}
               </Button>

@@ -15,6 +15,7 @@ import {
   Settings,
   User,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const NewDashboardPage = () => {
   const [activeSection, setActiveSection] = useState('dashboard');
@@ -168,9 +169,16 @@ const NewDashboardPage = () => {
       <main className='flex-1 flex flex-col h-screen overflow-hidden relative'>
         {/* Header mobile */}
         <header className='md:hidden h-16 border-b border-zinc-200 bg-white flex items-center justify-between px-4 shrink-0 z-20'>
-          <span className='font-semibold tracking-tight'>Casa Pura Vida</span>
+          <div className='absolute left-0 right-0 px-4 flex items-center justify-center gap-3'>
+            <span className='font-semibold tracking-tight'>Casa Pura Vida</span>
+            <Button asChild variant='gradient' size='sm' className='h-8 px-3'>
+              <a href='/' target='_blank' rel='noopener noreferrer'>
+                Veja seu site
+              </a>
+            </Button>
+          </div>
           <button
-            className='p-2 text-zinc-500'
+            className='p-2 text-zinc-500 ml-auto'
             onClick={() => setMobileOpen(true)}
           >
             <svg

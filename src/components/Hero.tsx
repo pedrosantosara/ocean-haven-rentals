@@ -2,7 +2,7 @@ import { Button } from './ui/button';
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import heroVideo from '@/assets/videos/video-casa.mp4';
-import posterImage from '@/assets/piscina-home.jpg';
+import posterImage from '@/assets/images/piscina-home.jpg';
 
 export const Hero = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);

@@ -515,96 +515,47 @@ export const NewDashboard: React.FC<{
 
   return (
     <>
-      <div className='flex flex-col md:flex-row md:items-center justify-between gap-4'>
-        <div>
-          <h1 className='text-2xl font-semibold tracking-tight text-zinc-900'>
-            Visão Geral
-          </h1>
-          <p className='text-sm text-zinc-500 mt-1'>
-            Gerencie suas reservas e disponibilidade.
-          </p>
-        </div>
-        <div className='flex items-center gap-2'>
-          <button className='inline-flex items-center justify-center gap-2 px-4 py-2 bg-white border border-zinc-200 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all shadow-sm'>
-            <Link className='w-4 h-4' />
-            Copiar Link iCal
-          </button>
-          <button
-            className='inline-flex items-center justify-center gap-2 px-4 py-2 bg-zinc-900 text-white rounded-md text-sm font-medium hover:bg-zinc-800 transition-all shadow-sm hover:shadow-md'
-            onClick={() => setManualOpen(true)}
-          >
-            <Plus className='w-4 h-4' />
-            Nova Reserva Manual
-          </button>
-        </div>
-      </div>
-
-      <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mt-6'>
-        <div className='p-6 rounded-xl border border-zinc-200 bg-white shadow-sm'>
-          <div className='flex items-center justify-between mb-4'>
-            <span className='text-sm font-medium text-zinc-500'>
-              Receita Mensal
-            </span>
-            <TrendingUp className='w-4 h-4 text-zinc-400' />
-          </div>
-          <div className='text-2xl font-semibold tracking-tight'>
-            R${' '}
-            {stats.monthlyRevenue.toLocaleString('pt-BR', {
-              minimumFractionDigits: 2,
-            })}
-          </div>
-        </div>
-        <div className='p-6 rounded-xl border border-zinc-200 bg-white shadow-sm'>
-          <div className='flex items-center justify-between mb-4'>
-            <span className='text-sm font-medium text-zinc-500'>Ocupação</span>
-            <Home className='w-4 h-4 text-zinc-400' />
-          </div>
-          <div className='text-2xl font-semibold tracking-tight'>
-            {stats.occupancy}%
-          </div>
-        </div>
-        <div className='p-6 rounded-xl border border-zinc-200 bg-white shadow-sm'>
-          <div className='flex items-center justify-between mb-4'>
-            <span className='text-sm font-medium text-zinc-500'>Pendentes</span>
-            <Bell className='w-4 h-4 text-zinc-400' />
-          </div>
-          <div className='text-2xl font-semibold tracking-tight'>
-            {stats.pendingRequests}
-          </div>
-        </div>
-      </div>
-
       <div className='grid grid-cols-1 gap-12 mt-8'>
-        <div className='bg-white border border-zinc-200 rounded-xl shadow-sm overflow-hidden'>
-          <div className='p-4 border-b border-zinc-200 flex items-center justify-between'>
-            <h2 className='font-medium text-zinc-900'>
-              {monthNames[month]} {year}
-            </h2>
-            <div className='flex gap-1'>
-              <button
-                onClick={prevMonth}
-                className='p-1 hover:bg-zinc-100 rounded text-zinc-500'
-              >
-                <ChevronLeft className='w-4 h-4' />
-              </button>
-              <button
-                onClick={nextMonth}
-                className='p-1 hover:bg-zinc-100 rounded text-zinc-500'
-              >
-                <ChevronRight className='w-4 h-4' />
-              </button>
-              <button
-                onClick={() => {
-                  setMultiSelect((v) => !v);
-                  setSelectedDays(new Set());
-                }}
-                className='ml-2 px-2 py-1 text-xs border border-zinc-200 rounded text-zinc-600 hover:bg-zinc-100'
-              >
-                {multiSelect ? 'Editar múltiplos' : 'Selecionar dias'}
-              </button>
+        <div className='glass-ocean w-full rounded-xl border border-primary/20 bg-card/40 shadow-ocean overflow-hidden'>
+          <div className='p-4 border-b border-primary/20'>
+            <div className='flex flex-col gap-2 md:flex-row md:items-center md:justify-between'>
+              <div className='flex items-center justify-center md:justify-start gap-3'>
+                <Button
+                  variant='outline'
+                  size='icon'
+                  className='h-9 w-9 md:h-8 md:w-8'
+                  onClick={prevMonth}
+                  aria-label='Mês anterior'
+                >
+                  <ChevronLeft className='w-5 h-5' />
+                </Button>
+                <h2 className='text-base md:text-lg font-semibold text-zinc-900'>
+                  {monthNames[month]} {year}
+                </h2>
+                <Button
+                  variant='outline'
+                  size='icon'
+                  className='h-9 w-9 md:h-8 md:w-8'
+                  onClick={nextMonth}
+                  aria-label='Próximo mês'
+                >
+                  <ChevronRight className='w-5 h-5' />
+                </Button>
+              </div>
+              <div className='flex justify-center md:justify-end'>
+                <button
+                  onClick={() => {
+                    setMultiSelect((v) => !v);
+                    setSelectedDays(new Set());
+                  }}
+                  className='px-2 py-1 text-xs border border-zinc-200 rounded text-zinc-600 hover:bg-zinc-100'
+                >
+                  {multiSelect ? 'Editar múltiplos' : 'Selecionar dias'}
+                </button>
+              </div>
             </div>
           </div>
-          <div className='p-6 md:p-5 overflow-hidden'>
+          <div className='p-3 md:p-5 overflow-hidden'>
             <div className='grid grid-cols-7 text-center mb-2 hidden md:grid'>
               {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((d) => (
                 <div
@@ -619,7 +570,7 @@ export const NewDashboard: React.FC<{
               {padding.map((i) => (
                 <div
                   key={`pad-${i}`}
-                  className='h-36 md:h-28 p-2 border border-transparent rounded-lg text-zinc-300 hidden md:block'
+                  className='h-24 sm:h-20 md:h-28 p-2 border border-transparent rounded-lg text-zinc-300 hidden md:block'
                 ></div>
               ))}
               {days.map((day) => {
@@ -632,15 +583,20 @@ export const NewDashboard: React.FC<{
                 });
                 const ds = format(new Date(year, month, day), 'yyyy-MM-dd');
                 const isSelected = selectedDays.has(ds);
+                const weekend = [0, 6].includes(
+                  new Date(year, month, day).getDay()
+                );
                 return (
                   <div
                     key={day}
-                    className={`h-36 md:h-28 p-3 md:p-2 border ${
+                    className={`h-20 sm:h-20 md:h-28 p-2 md:p-2 border ${
                       isSelected
                         ? 'border-blue-400 bg-blue-50/20'
                         : 'border-zinc-100'
                     } rounded-lg hover:border-zinc-200 transition-colors relative group cursor-pointer ${
                       isToday ? 'bg-blue-50/30' : ''
+                    } ${
+                      !isSelected && !isToday && weekend ? 'bg-accent/30' : ''
                     }`}
                     onClick={() => {
                       if (multiSelect) {
@@ -662,9 +618,9 @@ export const NewDashboard: React.FC<{
                   >
                     <div className='flex items-center gap-2 mb-1'>
                       <span
-                        className={`text-base md:text-sm font-medium ${
+                        className={`text-sm md:text-xs font-medium ${
                           isToday
-                            ? 'text-blue-600 bg-blue-100 w-7 h-7 flex items-center justify-center rounded-full'
+                            ? 'text-blue-600 bg-blue-100 w-6 h-6 md:w-7 md:h-7 flex items-center justify-center rounded-full'
                             : 'text-zinc-700'
                         }`}
                       >
@@ -700,8 +656,22 @@ export const NewDashboard: React.FC<{
                 );
               })}
             </div>
+            <div className='mt-3 flex items-center gap-3 text-xs text-muted-foreground'>
+              <div className='flex items-center gap-1'>
+                <span className='inline-block h-3 w-3 rounded bg-red-50 border border-red-200' />{' '}
+                Ocupado
+              </div>
+              <div className='flex items-center gap-1'>
+                <span className='inline-block h-3 w-3 rounded bg-accent/30 border border-accent' />{' '}
+                Fim de semana
+              </div>
+              <div className='flex items-center gap-1'>
+                <span className='inline-block h-3 w-3 rounded bg-accent/60' />{' '}
+                Selecionado
+              </div>
+            </div>
             {multiSelect && selectedDays.size > 0 && (
-              <div className='mt-4 p-4 bg-zinc-50 border border-zinc-200 rounded-lg flex items-center gap-3'>
+              <div className='mt-4 p-4 bg-zinc-50 border border-zinc-200 rounded-lg flex items-center flex-wrap gap-3'>
                 <div className='text-sm text-zinc-600'>
                   {selectedDays.size} dia(s) selecionado(s)
                 </div>
@@ -709,6 +679,7 @@ export const NewDashboard: React.FC<{
                   placeholder='Valor em reais'
                   value={bulkPriceInput}
                   onChange={(e) => setBulkPriceInput(e.target.value)}
+                  className='flex-1 min-w-[180px]'
                 />
                 <Button
                   onClick={async () => {
@@ -743,12 +714,14 @@ export const NewDashboard: React.FC<{
                       toast.error('Erro ao atualizar preços');
                     }
                   }}
+                  size='sm'
                 >
                   Aplicar preço aos selecionados
                 </Button>
                 <Button
                   variant='outline'
                   onClick={() => setSelectedDays(new Set())}
+                  size='sm'
                 >
                   Limpar seleção
                 </Button>
@@ -849,7 +822,12 @@ export const NewDashboard: React.FC<{
                           Total ({nights} noite{nights === 1 ? '' : 's'})
                         </span>
                         <span className='text-lg font-semibold tracking-tight text-zinc-900'>
-                          R$ {Number(r.total || 0).toLocaleString('pt-BR')}
+                          {new Intl.NumberFormat('pt-BR', {
+                            style: 'currency',
+                            currency: 'BRL',
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          }).format(Number(r.total || 0))}
                         </span>
                       </div>
                     </div>
@@ -1213,6 +1191,62 @@ export const NewDashboard: React.FC<{
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className='flex flex-col md:flex-row md:items-center justify-between gap-4 mt-8'>
+        <div>
+          <h1 className='text-2xl font-semibold tracking-tight text-zinc-900'>
+            Visão Geral
+          </h1>
+          <p className='text-sm text-zinc-500 mt-1'>
+            Gerencie suas reservas e disponibilidade.
+          </p>
+        </div>
+        <div className='flex items-center gap-2'>
+          <button className='inline-flex items-center justify-center gap-2 px-4 py-2 bg-white border border-zinc-200 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-50 hover:border-zinc-300 transition-all shadow-sm'>
+            <Link className='w-4 h-4' />
+            Copiar Link iCal
+          </button>
+          <Button variant='gradient' onClick={() => setManualOpen(true)}>
+            <Plus className='w-4 h-4' />
+            Nova Reserva Manual
+          </Button>
+        </div>
+      </div>
+
+      <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mt-6'>
+        <div className='p-6 rounded-xl border border-zinc-200 bg-white shadow-sm'>
+          <div className='flex items-center justify-between mb-4'>
+            <span className='text-sm font-medium text-zinc-500'>
+              Receita Mensal
+            </span>
+            <TrendingUp className='w-4 h-4 text-zinc-400' />
+          </div>
+          <div className='text-2xl font-semibold tracking-tight'>
+            R${' '}
+            {stats.monthlyRevenue.toLocaleString('pt-BR', {
+              minimumFractionDigits: 2,
+            })}
+          </div>
+        </div>
+        <div className='p-6 rounded-xl border border-zinc-200 bg-white shadow-sm'>
+          <div className='flex items-center justify-between mb-4'>
+            <span className='text-sm font-medium text-zinc-500'>Ocupação</span>
+            <Home className='w-4 h-4 text-zinc-400' />
+          </div>
+          <div className='text-2xl font-semibold tracking-tight'>
+            {stats.occupancy}%
+          </div>
+        </div>
+        <div className='p-6 rounded-xl border border-zinc-200 bg-white shadow-sm'>
+          <div className='flex items-center justify-between mb-4'>
+            <span className='text-sm font-medium text-zinc-500'>Pendentes</span>
+            <Bell className='w-4 h-4 text-zinc-400' />
+          </div>
+          <div className='text-2xl font-semibold tracking-tight'>
+            {stats.pendingRequests}
           </div>
         </div>
       </div>
