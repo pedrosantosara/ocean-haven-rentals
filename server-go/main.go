@@ -200,6 +200,102 @@ func (s *Server) handleCompleteSignup(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, 200, map[string]bool{"success": true})
 }
 
+func (s *Server) handleRequestCode(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Email, BookingID string }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	bid := strings.TrimSpace(body.BookingID)
+	if email == "" || bid == "" {
+		jsonResp(w, 400, map[string]string{"error": "invalid_input"})
+		return
+	}
+	var guestEmail, customerEmail, guestName string
+	if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_email,''), COALESCE(u.email,''), COALESCE(guest_name,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", bid).Scan(&guestEmail, &customerEmail, &guestName); err != nil {
+		jsonResp(w, 404, map[string]string{"error": "not_found"})
+		return
+	}
+	gm := strings.ToLower(strings.TrimSpace(guestEmail))
+	cm := strings.ToLower(strings.TrimSpace(customerEmail))
+	if email != gm && email != cm {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	var buf [3]byte
+	_, _ = rand.Read(buf[:])
+	n := int(buf[0])<<16 | int(buf[1])<<8 | int(buf[2])
+	code := fmt.Sprintf("%06d", n%1000000)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(code), 10)
+	_, _ = s.pool.Exec(r.Context(), "INSERT INTO verifications (email, booking_id, code_hash, expires_at, created_at) VALUES ($1,$2,$3, now() + interval '10 minute', now()) ON CONFLICT (email) DO UPDATE SET booking_id=EXCLUDED.booking_id, code_hash=EXCLUDED.code_hash, expires_at=EXCLUDED.expires_at, created_at=now()", email, bid, string(hash))
+	if s.email != nil {
+		name := guestName
+		if name == "" {
+			name = email
+		}
+		_ = s.email.SendTwoFactorEmail(email, emailpkg.TwoFactorData{Name: name, Code: code})
+	}
+	jsonResp(w, 200, map[string]bool{"sent": true})
+}
+
+func (s *Server) handleVerifyCode(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Email, BookingID, Code string }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	bid := strings.TrimSpace(body.BookingID)
+	code := strings.TrimSpace(body.Code)
+	if email == "" || bid == "" || code == "" {
+		jsonResp(w, 400, map[string]string{"error": "invalid_input"})
+		return
+	}
+	var codeHash string
+	var exp time.Time
+	var vbid string
+	if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(code_hash,''), COALESCE(expires_at, now()), COALESCE(booking_id,'') FROM verifications WHERE email=$1", email).Scan(&codeHash, &exp, &vbid); err != nil || codeHash == "" {
+		jsonResp(w, 400, map[string]string{"error": "invalid_code"})
+		return
+	}
+	if time.Now().After(exp) {
+		jsonResp(w, 400, map[string]string{"error": "expired"})
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(codeHash), []byte(code)) != nil {
+		jsonResp(w, 400, map[string]string{"error": "invalid_code"})
+		return
+	}
+	var guestEmail, customerID string
+	if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_email,''), COALESCE(customer_id,'') FROM bookings WHERE id=$1", bid).Scan(&guestEmail, &customerID); err != nil {
+		jsonResp(w, 404, map[string]string{"error": "not_found"})
+		return
+	}
+	gm := strings.ToLower(strings.TrimSpace(guestEmail))
+	if gm != email && guestEmail != "" {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	var userID string
+	var isOwner bool
+	err := s.pool.QueryRow(r.Context(), "SELECT id, COALESCE(is_owner,false) FROM users WHERE email=$1", email).Scan(&userID, &isOwner)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			var buf [16]byte
+			_, _ = rand.Read(buf[:])
+			inv := hex.EncodeToString(buf[:])
+			h, _ := bcrypt.GenerateFromPassword([]byte(inv), 10)
+			_, _ = s.pool.Exec(r.Context(), "INSERT INTO users (email, password_hash, full_name, is_owner, invite_token) VALUES ($1,$2,'',false,$3)", email, string(h), inv)
+			_ = s.pool.QueryRow(r.Context(), "SELECT id FROM users WHERE email=$1", email).Scan(&userID)
+		} else {
+			jsonResp(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if customerID == "" && userID != "" {
+		_, _ = s.pool.Exec(r.Context(), "UPDATE bookings SET customer_id=$1 WHERE id=$2", userID, bid)
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"email": email, "is_owner": false, "exp": time.Now().Add(7 * 24 * time.Hour).Unix()})
+	str, _ := token.SignedString([]byte(s.jwtSecret))
+	_, _ = s.pool.Exec(r.Context(), "DELETE FROM verifications WHERE email=$1", email)
+	jsonResp(w, 200, map[string]any{"token": str})
+}
+
 func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	c := getClaims(r)
 	email := fmt.Sprintf("%v", c["email"])
@@ -927,13 +1023,16 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		if v, ok := claims["is_owner"].(bool); ok {
 			isOwner = v
-		} else {
-			isOwner = false
+		}
+		if !isOwner {
+			var dbOwner bool
+			_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(is_owner,false) FROM users WHERE email=$1", fmt.Sprintf("%v", claims["email"])).Scan(&dbOwner)
+			isOwner = dbOwner
 		}
 		var customerEmail, guestEmail string
 		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", body.BookingID).Scan(&customerEmail, &guestEmail)
-		email := fmt.Sprintf("%v", claims["email"])
-		if !isOwner && email != customerEmail && email != guestEmail {
+		email := strings.TrimSpace(strings.ToLower(fmt.Sprintf("%v", claims["email"])))
+		if !isOwner && !(email == strings.TrimSpace(strings.ToLower(customerEmail)) || email == strings.TrimSpace(strings.ToLower(guestEmail))) {
 			jsonResp(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
@@ -1047,11 +1146,14 @@ func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		var isOwner bool
 		if v, ok := claims["is_owner"].(bool); ok {
 			isOwner = v
-		} else {
-			isOwner = false
 		}
-		email := fmt.Sprintf("%v", claims["email"])
-		if !isOwner && email != customerEmail && email != guestEmail {
+		if !isOwner {
+			var dbOwner bool
+			_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(is_owner,false) FROM users WHERE email=$1", fmt.Sprintf("%v", claims["email"])).Scan(&dbOwner)
+			isOwner = dbOwner
+		}
+		email := strings.TrimSpace(strings.ToLower(fmt.Sprintf("%v", claims["email"])))
+		if !isOwner && !(email == strings.TrimSpace(strings.ToLower(customerEmail)) || email == strings.TrimSpace(strings.ToLower(guestEmail))) {
 			jsonResp(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
@@ -1300,6 +1402,13 @@ CREATE TABLE IF NOT EXISTS date_prices (
   price NUMERIC NOT NULL,
   updated_at TIMESTAMP DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS verifications (
+  email TEXT PRIMARY KEY,
+  booking_id UUID,
+  code_hash TEXT,
+  expires_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT now()
+);
 `)
 	_, err := pool.Exec(ctx, `
 ALTER TABLE users ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
@@ -1521,13 +1630,16 @@ func (s *Server) handleWSMessages(w http.ResponseWriter, r *http.Request) {
 		var isOwner bool
 		if v, ok := claims["is_owner"].(bool); ok {
 			isOwner = v
-		} else {
-			isOwner = false
+		}
+		if !isOwner {
+			var dbOwner bool
+			_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(is_owner,false) FROM users WHERE email=$1", fmt.Sprintf("%v", claims["email"])).Scan(&dbOwner)
+			isOwner = dbOwner
 		}
 		var customerEmail, guestEmail string
 		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", bookingID).Scan(&customerEmail, &guestEmail)
-		email := fmt.Sprintf("%v", claims["email"])
-		if !isOwner && email != customerEmail && email != guestEmail {
+		email := strings.TrimSpace(strings.ToLower(fmt.Sprintf("%v", claims["email"])))
+		if !isOwner && !(email == strings.TrimSpace(strings.ToLower(customerEmail)) || email == strings.TrimSpace(strings.ToLower(guestEmail))) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -1666,6 +1778,8 @@ func main() {
 	r.HandleFunc("/auth/login", s.handleLogin).Methods("POST")
 	r.Handle("/auth/me", s.authMiddleware(http.HandlerFunc(s.handleMe))).Methods("GET")
 	r.HandleFunc("/auth/complete", s.handleCompleteSignup).Methods("POST")
+	r.HandleFunc("/auth/request-code", s.handleRequestCode).Methods("POST")
+	r.HandleFunc("/auth/verify-code", s.handleVerifyCode).Methods("POST")
 	r.HandleFunc("/guest/find-booking", s.handleGuestFindBooking).Methods("POST")
 	r.Handle("/ical", s.authMiddleware(http.HandlerFunc(s.handleAddIcal))).Methods("POST")
 	r.Handle("/ical", s.authMiddleware(http.HandlerFunc(s.handleListIcal))).Methods("GET")
@@ -1942,9 +2056,9 @@ func (s *Server) handleCreatePaymentIntent(w http.ResponseWriter, r *http.Reques
 	pt := r.URL.Query().Get("pt")
 	var isOwner bool
 	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
-	email := fmt.Sprintf("%v", c["email"])
+	email := strings.TrimSpace(strings.ToLower(fmt.Sprintf("%v", c["email"])))
 	if pt == "" {
-		if !isOwner && email != customerEmail && email != guestEmail {
+		if !isOwner && !(email == strings.TrimSpace(strings.ToLower(customerEmail)) || email == strings.TrimSpace(strings.ToLower(guestEmail))) {
 			jsonResp(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
@@ -2023,9 +2137,9 @@ func (s *Server) handleCreateCheckoutSession(w http.ResponseWriter, r *http.Requ
 	pt := r.URL.Query().Get("pt")
 	var isOwner bool
 	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
-	email := fmt.Sprintf("%v", c["email"])
+	email := strings.TrimSpace(strings.ToLower(fmt.Sprintf("%v", c["email"])))
 	if pt == "" {
-		if !isOwner && email != customerEmail && email != guestEmail {
+		if !isOwner && !(email == strings.TrimSpace(strings.ToLower(customerEmail)) || email == strings.TrimSpace(strings.ToLower(guestEmail))) {
 			jsonResp(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}

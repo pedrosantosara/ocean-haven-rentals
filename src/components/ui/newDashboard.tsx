@@ -91,6 +91,14 @@ export const NewDashboard: React.FC<{
     >
   >({});
 
+  const getInitials = (name: string) =>
+    name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+
   const monthNames = [
     'Janeiro',
     'Fevereiro',
@@ -119,6 +127,10 @@ export const NewDashboard: React.FC<{
         ['approved', 'confirmed'].includes((r.status || '').toLowerCase())
       ),
     [reservations]
+  );
+  const previewReservations = useMemo(
+    () => [...pendingReservations, ...acceptedReservations],
+    [pendingReservations, acceptedReservations]
   );
 
   useEffect(() => {
@@ -171,7 +183,7 @@ export const NewDashboard: React.FC<{
     const token = localStorage.getItem('token');
     if (!token) return;
     const API = 'http://localhost:3005';
-    const ids = pendingReservations.map((r) => r.id);
+    const ids = previewReservations.map((r) => r.id);
     if (ids.length === 0) {
       setLastMessagePreview({});
       setRecentMessagesPreview({});
@@ -224,19 +236,18 @@ export const NewDashboard: React.FC<{
       list.forEach((entry) => {
         if (entry && entry.text) {
           map[entry.id] = { text: entry.text, created_at: entry.created_at };
-          mapRecent[entry.id] = entry.recent;
         }
       });
       setLastMessagePreview(map);
       setRecentMessagesPreview(mapRecent);
     });
-  }, [pendingReservations]);
+  }, [previewReservations]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
     const conns: Array<WebSocket> = [];
-    pendingReservations.forEach((r) => {
+    previewReservations.forEach((r) => {
       const wsUrl = `ws://localhost:3005/ws/messages?booking_id=${r.id}&token=${token}`;
       const ws = new WebSocket(wsUrl);
       ws.onmessage = (ev) => {
@@ -276,7 +287,7 @@ export const NewDashboard: React.FC<{
     return () => {
       conns.forEach((ws) => ws.close());
     };
-  }, [pendingReservations]);
+  }, [previewReservations]);
 
   const loadDashboardData = async () => {
     try {
@@ -852,19 +863,83 @@ export const NewDashboard: React.FC<{
                           {recentMessagesPreview[r.id].map((m, idx) => (
                             <div
                               key={`${r.id}-${idx}`}
-                              className={`text-xs ${
+                              className={`flex ${
                                 m.is_from_owner
-                                  ? 'text-zinc-700'
-                                  : 'text-zinc-600'
+                                  ? 'justify-end'
+                                  : 'justify-start'
                               }`}
                             >
-                              {m.text}
+                              <div
+                                className={`flex gap-2 max-w-[70%] ${
+                                  m.is_from_owner ? 'flex-row-reverse' : ''
+                                }`}
+                              >
+                                <div
+                                  className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-semibold ${
+                                    m.is_from_owner
+                                      ? 'bg-zinc-100 text-zinc-600'
+                                      : 'bg-blue-100 text-blue-600'
+                                  }`}
+                                >
+                                  {m.is_from_owner ? (
+                                    <User size={12} />
+                                  ) : (
+                                    getInitials(r.guestName)
+                                  )}
+                                </div>
+                                <div>
+                                  <div
+                                    className={`p-2 rounded-2xl text-xs ${
+                                      m.is_from_owner
+                                        ? 'bg-zinc-900 text-white rounded-tr-none'
+                                        : 'bg-white border border-zinc-200 text-zinc-900 rounded-tl-none shadow-sm'
+                                    }`}
+                                  >
+                                    {m.text}
+                                  </div>
+                                  <div className='flex items-center gap-1 mt-1'>
+                                    <span className='text-[10px] text-zinc-500'>
+                                      {(() => {
+                                        const d = new Date(m.created_at);
+                                        return isNaN(d.getTime())
+                                          ? ''
+                                          : format(d, 'HH:mm', {
+                                              locale: ptBR,
+                                            });
+                                      })()}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           ))}
                         </div>
                       ) : lastMessagePreview[r.id]?.text ? (
-                        <div className='text-sm text-zinc-600 truncate max-w-[70%] mb-2'>
-                          {lastMessagePreview[r.id].text}
+                        <div className='space-y-2 mb-2'>
+                          <div className='flex justify-start'>
+                            <div className='flex gap-2 max-w-[70%]'>
+                              <div className='w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-semibold bg-blue-100 text-blue-600'>
+                                {getInitials(r.guestName)}
+                              </div>
+                              <div>
+                                <div className='p-2 rounded-2xl text-xs bg-white border border-zinc-200 text-zinc-900 rounded-tl-none shadow-sm'>
+                                  {lastMessagePreview[r.id].text}
+                                </div>
+                                <div className='flex items-center gap-1 mt-1'>
+                                  <span className='text-[10px] text-zinc-500'>
+                                    {(() => {
+                                      const d = new Date(
+                                        lastMessagePreview[r.id].created_at
+                                      );
+                                      return isNaN(d.getTime())
+                                        ? ''
+                                        : format(d, 'HH:mm', { locale: ptBR });
+                                    })()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       ) : null}
                       <div className='flex items-center justify-end mb-2'>
@@ -988,6 +1063,116 @@ export const NewDashboard: React.FC<{
                           {format(new Date(r.checkOut), 'dd MMM', {
                             locale: ptBR,
                           })}
+                        </div>
+                        <div className='bg-zinc-50 rounded-lg p-3 mt-4 border border-zinc-100'>
+                          <p className='text-[10px] font-medium text-zinc-400 mb-2 uppercase tracking-wider'>
+                            Conversa
+                          </p>
+                          {recentMessagesPreview[r.id] &&
+                          recentMessagesPreview[r.id].length > 0 ? (
+                            <div className='space-y-2 mb-2'>
+                              {recentMessagesPreview[r.id].map((m, idx) => (
+                                <div
+                                  key={`${r.id}-acc-${idx}`}
+                                  className={`flex ${
+                                    m.is_from_owner
+                                      ? 'justify-end'
+                                      : 'justify-start'
+                                  }`}
+                                >
+                                  <div
+                                    className={`flex gap-2 max-w-[70%] ${
+                                      m.is_from_owner ? 'flex-row-reverse' : ''
+                                    }`}
+                                  >
+                                    <div
+                                      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-semibold ${
+                                        m.is_from_owner
+                                          ? 'bg-zinc-100 text-zinc-600'
+                                          : 'bg-blue-100 text-blue-600'
+                                      }`}
+                                    >
+                                      {m.is_from_owner ? (
+                                        <User size={12} />
+                                      ) : (
+                                        getInitials(r.guestName)
+                                      )}
+                                    </div>
+                                    <div>
+                                      <div
+                                        className={`p-2 rounded-2xl text-xs ${
+                                          m.is_from_owner
+                                            ? 'bg-zinc-900 text-white rounded-tr-none'
+                                            : 'bg-white border border-zinc-200 text-zinc-900 rounded-tl-none shadow-sm'
+                                        }`}
+                                      >
+                                        {m.text}
+                                      </div>
+                                      <div className='flex items-center gap-1 mt-1'>
+                                        <span className='text-[10px] text-zinc-500'>
+                                          {(() => {
+                                            const d = new Date(m.created_at);
+                                            return isNaN(d.getTime())
+                                              ? ''
+                                              : format(d, 'HH:mm', {
+                                                  locale: ptBR,
+                                                });
+                                          })()}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : lastMessagePreview[r.id]?.text ? (
+                            <div className='space-y-2 mb-2'>
+                              <div className='flex justify-start'>
+                                <div className='flex gap-2 max-w-[70%]'>
+                                  <div className='w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] font-semibold bg-blue-100 text-blue-600'>
+                                    {getInitials(r.guestName)}
+                                  </div>
+                                  <div>
+                                    <div className='p-2 rounded-2xl text-xs bg-white border border-zinc-200 text-zinc-900 rounded-tl-none shadow-sm'>
+                                      {lastMessagePreview[r.id].text}
+                                    </div>
+                                    <div className='flex items-center gap-1 mt-1'>
+                                      <span className='text-[10px] text-zinc-500'>
+                                        {(() => {
+                                          const d = new Date(
+                                            lastMessagePreview[r.id].created_at
+                                          );
+                                          return isNaN(d.getTime())
+                                            ? ''
+                                            : format(d, 'HH:mm', {
+                                                locale: ptBR,
+                                              });
+                                        })()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ) : null}
+                          <div className='flex items-center justify-end'>
+                            <button
+                              className='text-xs text-primary hover:underline'
+                              onClick={() => {
+                                if (onNavClick) onNavClick('messages');
+                                const dest = r.guestEmail
+                                  ? `/dashboard?guest_email=${encodeURIComponent(
+                                      r.guestEmail
+                                    )}`
+                                  : `/dashboard?booking_id=${encodeURIComponent(
+                                      r.id
+                                    )}`;
+                                navigate(dest);
+                              }}
+                            >
+                              Abrir conversa
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <div className='flex items-center gap-2'>

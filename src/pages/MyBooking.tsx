@@ -105,34 +105,19 @@ export default function MyBooking() {
     }
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        setShowGuestAuth(true);
+        toast.error('Verifique sua identidade para continuar');
+        return;
+      }
       const API = 'http://localhost:3005';
       const params = new URLSearchParams(window.location.search);
       const pt = params.get('pt');
-      let url = `${API}/bookings/${booking.id}/payment-intent`;
+      const url = `${API}/bookings/${booking.id}/payment-intent`;
       const headers: Record<string, string> = {};
-      if (pt) {
-        url += `?pt=${encodeURIComponent(pt)}`;
-      } else {
-        if (!token) {
-          toast.error('Faça login');
-          return;
-        }
-        headers.Authorization = `Bearer ${token}`;
-      }
+      headers.Authorization = `Bearer ${token}`;
       const r = await fetch(url, { method: 'POST', headers });
       if (!r.ok) {
-        const checkoutUrl = `${API}/bookings/${booking.id}/checkout${
-          pt ? `?pt=${encodeURIComponent(pt)}` : ''
-        }`;
-        const rc = await fetch(checkoutUrl, { method: 'POST', headers });
-        if (rc.ok) {
-          const cj = await rc.json();
-          const u = String(cj.url || '');
-          if (u) {
-            window.open(u, '_blank');
-            return;
-          }
-        }
         toast.error('Falha ao iniciar pagamento');
         return;
       }
@@ -161,6 +146,73 @@ export default function MyBooking() {
       }, 0);
     } catch (_e) {
       toast.error('Falha ao iniciar pagamento');
+    }
+  };
+
+  const requestCode = async () => {
+    if (!booking) return;
+    const email = guestEmailInput.trim();
+    if (!email) {
+      toast.error('Informe seu email');
+      return;
+    }
+    try {
+      setIsRequestingCode(true);
+      const API = 'http://localhost:3005';
+      const res = await fetch(`${API}/auth/request-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Email: email, BookingID: booking.id }),
+      });
+      if (res.ok) {
+        setCodeRequested(true);
+        toast.success('Código enviado para seu email');
+      } else {
+        const j = await res.json().catch(() => ({}));
+        toast.error(String(j.error || 'Erro ao enviar código'));
+      }
+    } finally {
+      setIsRequestingCode(false);
+    }
+  };
+
+  const verifyCode = async () => {
+    if (!booking) return;
+    const email = guestEmailInput.trim();
+    const code = codeInput.trim();
+    if (!email || !code) {
+      toast.error('Preencha email e código');
+      return;
+    }
+    try {
+      setIsVerifyingCode(true);
+      const API = 'http://localhost:3005';
+      const res = await fetch(`${API}/auth/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          Email: email,
+          BookingID: booking.id,
+          Code: code,
+        }),
+      });
+      if (res.ok) {
+        const j = await res.json();
+        const token = String(j.token || '');
+        if (token) {
+          localStorage.setItem('token', token);
+          setShowGuestAuth(false);
+          toast.success('Verificação concluída');
+          await loadBookingAndMessages();
+        } else {
+          toast.error('Token inválido');
+        }
+      } else {
+        const j = await res.json().catch(() => ({}));
+        toast.error(String(j.error || 'Código inválido'));
+      }
+    } finally {
+      setIsVerifyingCode(false);
     }
   };
 
@@ -470,7 +522,11 @@ export default function MyBooking() {
     if (!paymentInvite || !booking) return;
     if (paymentInvite.bookingId !== booking.id) return;
     if (booking.status !== 'confirmed') return;
-    handlePay();
+    if (localStorage.getItem('token')) {
+      handlePay();
+    } else {
+      setShowGuestAuth(true);
+    }
   }, [paymentInvite, booking]);
 
   const loadMessages = async (bookingId: string) => {
@@ -685,6 +741,56 @@ export default function MyBooking() {
                   <div className='mt-6 w-full'>
                     <div className='flex flex-col md:flex-row md:items-end md:justify-between gap-3'></div>
                     <div className='mt-6 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
+                      {booking.status === 'confirmed' &&
+                        !localStorage.getItem('token') && (
+                          <div className='mb-6 p-4 border border-zinc-200 rounded-lg bg-white'>
+                            <p className='text-sm font-semibold text-zinc-900'>
+                              Verificar identidade
+                            </p>
+                            <p className='text-xs text-zinc-500 mb-3'>
+                              Digite seu email para receber um código e entrar
+                              com segurança.
+                            </p>
+                            <div className='flex gap-2 mb-2'>
+                              <input
+                                type='email'
+                                placeholder='seu@email.com'
+                                value={guestEmailInput}
+                                onChange={(e) =>
+                                  setGuestEmailInput(e.target.value)
+                                }
+                                className='flex-1 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500'
+                              />
+                              <Button
+                                onClick={requestCode}
+                                disabled={isRequestingCode}
+                              >
+                                {isRequestingCode
+                                  ? 'Enviando...'
+                                  : 'Enviar código'}
+                              </Button>
+                            </div>
+                            {codeRequested && (
+                              <div className='flex gap-2'>
+                                <input
+                                  type='text'
+                                  placeholder='Código'
+                                  value={codeInput}
+                                  onChange={(e) => setCodeInput(e.target.value)}
+                                  className='flex-1 border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500'
+                                />
+                                <Button
+                                  onClick={verifyCode}
+                                  disabled={isVerifyingCode}
+                                >
+                                  {isVerifyingCode
+                                    ? 'Verificando...'
+                                    : 'Validar e entrar'}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       <p className='text-sm md:text-base font-semibold text-muted-foreground tracking-wide'>
                         Price details
                       </p>
