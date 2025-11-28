@@ -59,8 +59,31 @@ export default function MyBooking() {
   const stripeRef = useRef<unknown>(null);
   const elementsRef = useRef<unknown>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-  const [paymentInvite, setPaymentInvite] = useState<{ pt?: string; bookingId?: string } | null>(null);
+  const [paymentInvite, setPaymentInvite] = useState<{
+    pt?: string;
+    bookingId?: string;
+  } | null>(null);
   const navBooking = (location.state as LocationState | null)?.booking || null;
+  const [guestEmailInput, setGuestEmailInput] = useState('');
+  const [codeInput, setCodeInput] = useState('');
+  const [isRequestingCode, setIsRequestingCode] = useState(false);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [codeRequested, setCodeRequested] = useState(false);
+  const [showGuestAuth, setShowGuestAuth] = useState(false);
+  const [fullNameInput, setFullNameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const ptParam = new URLSearchParams(window.location.search).get('pt') || '';
+  const guestEmail = (() => {
+    if (guestEmailInput.trim()) return guestEmailInput.trim();
+    try {
+      const raw = localStorage.getItem('guest_booking_session');
+      if (!raw) return '';
+      const s = JSON.parse(raw) as { guest_email?: string };
+      return String(s.guest_email || '').trim();
+    } catch {
+      return '';
+    }
+  })();
 
   const loadStripeScript = async () => {
     const hasStripe = (window as unknown as { Stripe?: unknown }).Stripe;
@@ -76,7 +99,10 @@ export default function MyBooking() {
 
   const handlePay = async () => {
     if (!booking) return;
-    if (booking.status !== 'confirmed') { toast.error('A reserva precisa ser aceita antes do pagamento'); return; }
+    if (booking.status !== 'confirmed') {
+      toast.error('A reserva precisa ser aceita antes do pagamento');
+      return;
+    }
     try {
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
@@ -84,19 +110,28 @@ export default function MyBooking() {
       const pt = params.get('pt');
       let url = `${API}/bookings/${booking.id}/payment-intent`;
       const headers: Record<string, string> = {};
-      if (pt) { url += `?pt=${encodeURIComponent(pt)}`; }
-      else {
-        if (!token) { toast.error('Faça login'); return; }
+      if (pt) {
+        url += `?pt=${encodeURIComponent(pt)}`;
+      } else {
+        if (!token) {
+          toast.error('Faça login');
+          return;
+        }
         headers.Authorization = `Bearer ${token}`;
       }
       const r = await fetch(url, { method: 'POST', headers });
       if (!r.ok) {
-        const checkoutUrl = `${API}/bookings/${booking.id}/checkout${pt ? `?pt=${encodeURIComponent(pt)}` : ''}`;
+        const checkoutUrl = `${API}/bookings/${booking.id}/checkout${
+          pt ? `?pt=${encodeURIComponent(pt)}` : ''
+        }`;
         const rc = await fetch(checkoutUrl, { method: 'POST', headers });
         if (rc.ok) {
           const cj = await rc.json();
           const u = String(cj.url || '');
-          if (u) { window.open(u, '_blank'); return; }
+          if (u) {
+            window.open(u, '_blank');
+            return;
+          }
         }
         toast.error('Falha ao iniciar pagamento');
         return;
@@ -106,14 +141,23 @@ export default function MyBooking() {
       setClientSecret(String(j.client_secret || ''));
       await loadStripeScript();
       const w = window as unknown as { Stripe: (key: string) => unknown };
-      const stripe = w.Stripe(String(j.publishable_key || '')) as unknown as { elements: (opts: { clientSecret: string }) => unknown };
-      const elements = (stripe.elements({ clientSecret: String(j.client_secret || '') }) as unknown) as { create: (type: string) => { mount: (el: HTMLElement) => void } };
+      const stripe = w.Stripe(String(j.publishable_key || '')) as unknown as {
+        elements: (opts: { clientSecret: string }) => unknown;
+      };
+      const elements = stripe.elements({
+        clientSecret: String(j.client_secret || ''),
+      }) as unknown as {
+        create: (type: string) => { mount: (el: HTMLElement) => void };
+      };
       const paymentElement = elements.create('payment');
       stripeRef.current = stripe;
       elementsRef.current = elements;
       setShowPayment(true);
       setTimeout(() => {
-        if (paymentContainerRef.current) { paymentContainerRef.current.innerHTML = ''; paymentElement.mount(paymentContainerRef.current); }
+        if (paymentContainerRef.current) {
+          paymentContainerRef.current.innerHTML = '';
+          paymentElement.mount(paymentContainerRef.current);
+        }
       }, 0);
     } catch (_e) {
       toast.error('Falha ao iniciar pagamento');
@@ -126,14 +170,29 @@ export default function MyBooking() {
       setIsPaying(true);
       const stripe = stripeRef.current;
       const elements = elementsRef.current;
-      const result = await stripe.confirmPayment({ elements, redirect: 'if_required' });
-      if (result.error) { toast.error('Pagamento não confirmado'); setIsPaying(false); return; }
+      const result = await stripe.confirmPayment({
+        elements,
+        redirect: 'if_required',
+      });
+      if (result.error) {
+        toast.error('Pagamento não confirmado');
+        setIsPaying(false);
+        return;
+      }
       const token = localStorage.getItem('token');
       const API = 'http://localhost:3005';
-      const r = await fetch(`${API}/bookings/${booking.id}/mark-paid`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(`${API}/bookings/${booking.id}/mark-paid`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const jr = await r.json();
-      if (jr.paid) { toast.success('Pagamento confirmado'); setShowPayment(false); await loadBookingAndMessages(); }
-      else { toast.error('Pagamento pendente'); }
+      if (jr.paid) {
+        toast.success('Pagamento confirmado');
+        setShowPayment(false);
+        await loadBookingAndMessages();
+      } else {
+        toast.error('Pagamento pendente');
+      }
     } catch {
       toast.error('Erro ao confirmar pagamento');
     } finally {
@@ -143,14 +202,24 @@ export default function MyBooking() {
 
   const loadBookingAndMessages = useCallback(async () => {
     const token = localStorage.getItem('token');
-    if (!token) { setLoading(false); return; }
+    if (!token) {
+      setLoading(false);
+      return;
+    }
     const API = 'http://localhost:3005';
-    const meRes = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const meRes = await fetch(`${API}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (meRes.ok) {
       const me = await meRes.json();
-      if (me.is_owner) { navigate('/dashboard'); return; }
+      if (me.is_owner) {
+        navigate('/dashboard');
+        return;
+      }
     }
-    const res = await fetch(`${API}/bookings/mine`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${API}/bookings/mine`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (res.ok) {
       const j = await res.json();
       const rows = (j.data || []) as Array<Record<string, unknown>>;
@@ -158,30 +227,62 @@ export default function MyBooking() {
         id: String(raw.ID ?? raw.id ?? ''),
         status: ((): Booking['status'] => {
           switch (raw.Status ?? raw.status) {
-            case 'approved': return 'confirmed';
-            case 'rejected': return 'cancelled';
-            case 'requested': return 'pending';
-            case 'paid': return 'completed';
-            default: return 'pending';
+            case 'approved':
+              return 'confirmed';
+            case 'rejected':
+              return 'cancelled';
+            case 'requested':
+              return 'pending';
+            case 'paid':
+              return 'completed';
+            default:
+              return 'pending';
           }
         })(),
         check_in: String(raw.CheckIn ?? raw.check_in ?? ''),
         check_out: String(raw.CheckOut ?? raw.check_out ?? ''),
-        number_of_guests: Number(raw.NumberOfGuests ?? raw.number_of_guests ?? 0),
+        number_of_guests: Number(
+          raw.NumberOfGuests ?? raw.number_of_guests ?? 0
+        ),
         subtotal_price: Number(raw.SubtotalPrice ?? raw.subtotal_price ?? 0),
         discount_amount: Number(raw.DiscountAmount ?? raw.discount_amount ?? 0),
         total_price: Number(raw.TotalPrice ?? raw.total_price ?? 0),
       }));
       setAllBookings(mapped);
-      const raw = rows[0] as Record<string, unknown> | undefined;
+      const params = new URLSearchParams(window.location.search);
+      const qid = params.get('bookingId') || undefined;
+      const targetId = (
+        navBooking?.id ||
+        qid ||
+        (rows[0] &&
+          String(
+            (rows[0] as Record<string, unknown>).ID ??
+              (rows[0] as Record<string, unknown>).id ??
+              ''
+          )) ||
+        ''
+      ).toString();
+      const raw = rows.find(
+        (r) =>
+          String(
+            (r as Record<string, unknown>).ID ??
+              (r as Record<string, unknown>).id ??
+              ''
+          ) === targetId
+      ) as Record<string, unknown> | undefined;
       if (raw) {
         const mapStatus = (s: unknown): Booking['status'] => {
           switch (s) {
-            case 'approved': return 'confirmed';
-            case 'rejected': return 'cancelled';
-            case 'requested': return 'pending';
-            case 'paid': return 'completed';
-            default: return 'pending';
+            case 'approved':
+              return 'confirmed';
+            case 'rejected':
+              return 'cancelled';
+            case 'requested':
+              return 'pending';
+            case 'paid':
+              return 'completed';
+            default:
+              return 'pending';
           }
         };
         const latest: Booking = {
@@ -189,9 +290,13 @@ export default function MyBooking() {
           status: mapStatus(raw.Status ?? raw.status),
           check_in: String(raw.CheckIn ?? raw.check_in ?? ''),
           check_out: String(raw.CheckOut ?? raw.check_out ?? ''),
-          number_of_guests: Number(raw.NumberOfGuests ?? raw.number_of_guests ?? 0),
+          number_of_guests: Number(
+            raw.NumberOfGuests ?? raw.number_of_guests ?? 0
+          ),
           subtotal_price: Number(raw.SubtotalPrice ?? raw.subtotal_price ?? 0),
-          discount_amount: Number(raw.DiscountAmount ?? raw.discount_amount ?? 0),
+          discount_amount: Number(
+            raw.DiscountAmount ?? raw.discount_amount ?? 0
+          ),
           total_price: Number(raw.TotalPrice ?? raw.total_price ?? 0),
         };
         setBooking(latest);
@@ -209,15 +314,64 @@ export default function MyBooking() {
   }, [navBooking]);
 
   useEffect(() => {
+    if (localStorage.getItem('token')) return;
+    try {
+      const raw = localStorage.getItem('guest_booking_session');
+      if (!raw) return;
+      const s = JSON.parse(raw) as {
+        last_booking_id?: string;
+        check_in?: string;
+        check_out?: string;
+        number_of_guests?: number;
+        total_price?: number;
+        guest_name?: string;
+        guest_email?: string;
+      };
+      if (
+        s.last_booking_id &&
+        s.check_in &&
+        s.check_out &&
+        s.number_of_guests &&
+        s.total_price !== undefined
+      ) {
+        setBooking({
+          id: String(s.last_booking_id),
+          status: 'pending',
+          check_in: String(s.check_in),
+          check_out: String(s.check_out),
+          number_of_guests: Number(s.number_of_guests),
+          subtotal_price: undefined,
+          discount_amount: undefined,
+          total_price: Number(s.total_price),
+        });
+        if (s.guest_email) setGuestEmailInput(String(s.guest_email));
+        setShowGuestAuth(true);
+      }
+    } catch (_e) {
+      void 0;
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
     loadBookingAndMessages();
   }, [loadBookingAndMessages]);
 
   useEffect(() => {
     if (!booking) return;
     const token = localStorage.getItem('token');
-    if (!token) return;
-
-    const wsUrl = `ws://localhost:3005/ws/messages?booking_id=${booking.id}&token=${token}`;
+    const params = new URLSearchParams(window.location.search);
+    const pt = params.get('pt') || '';
+    if (!token && !pt && !guestEmail) return;
+    const wsUrl = token
+      ? `ws://localhost:3005/ws/messages?booking_id=${booking.id}&token=${token}`
+      : pt
+      ? `ws://localhost:3005/ws/messages?booking_id=${
+          booking.id
+        }&pt=${encodeURIComponent(pt)}`
+      : `ws://localhost:3005/ws/messages?booking_id=${
+          booking.id
+        }&guest_email=${encodeURIComponent(guestEmail)}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => console.log('Connected to chat WS');
@@ -243,6 +397,47 @@ export default function MyBooking() {
               },
             ];
           });
+          try {
+            const special = JSON.parse(String(d.message));
+            if (special && special.type === 'payment_invite') {
+              setBooking((prev) =>
+                prev && prev.id === d.booking_id
+                  ? { ...prev, status: 'confirmed' }
+                  : prev
+              );
+              const cu = String(
+                (special as Record<string, unknown>).checkout_url || ''
+              );
+              try {
+                const u = new URL(cu);
+                const pt = u.searchParams.get('pt') || undefined;
+                const bid = u.searchParams.get('bookingId') || undefined;
+                if (pt && bid) {
+                  setPaymentInvite({ pt, bookingId: bid });
+                }
+              } catch (_e) {
+                /* non-local checkout url */
+              }
+            }
+          } catch (_e) {
+            void 0;
+          }
+        } else if (data.type === 'status_update' && data.data) {
+          const d = data.data as { booking_id?: string; status?: string };
+          const st = String(d.status || '').toLowerCase();
+          const mapped: Booking['status'] =
+            st === 'confirmed'
+              ? 'confirmed'
+              : st === 'cancelled'
+              ? 'cancelled'
+              : st === 'completed'
+              ? 'completed'
+              : 'pending';
+          setBooking((prev) =>
+            prev && prev.id === d.booking_id
+              ? { ...prev, status: mapped }
+              : prev
+          );
         }
       } catch (e) {
         console.error('WS error', e);
@@ -250,7 +445,7 @@ export default function MyBooking() {
     };
 
     return () => ws.close();
-  }, [booking?.id]);
+  }, [booking?.id, guestEmail]);
 
   useEffect(() => {
     const el = messagesContainerRef.current;
@@ -262,8 +457,12 @@ export default function MyBooking() {
     const params = new URLSearchParams(window.location.search);
     const pt = params.get('pt') || undefined;
     const bid = params.get('bookingId') || undefined;
+    const email = params.get('email') || '';
     if (pt && bid) {
       setPaymentInvite({ pt, bookingId: bid });
+    }
+    if (email) {
+      setGuestEmailInput(email);
     }
   }, []);
 
@@ -276,23 +475,60 @@ export default function MyBooking() {
 
   const loadMessages = async (bookingId: string) => {
     const token = localStorage.getItem('token');
-    if (!token) return;
     const API = 'http://localhost:3005';
-    const res = await fetch(`${API}/messages?booking_id=${bookingId}`, { headers: { Authorization: `Bearer ${token}` } });
-    if (res.ok) { const j = await res.json(); setMessages(j.data || []); }
+    const params = new URLSearchParams(window.location.search);
+    const pt = params.get('pt') || '';
+    if (!token && !pt && !guestEmail) return;
+    const url = token
+      ? `${API}/messages?booking_id=${bookingId}`
+      : pt
+      ? `${API}/messages?booking_id=${bookingId}&pt=${encodeURIComponent(pt)}`
+      : `${API}/messages?booking_id=${bookingId}&guest_email=${encodeURIComponent(
+          guestEmail
+        )}`;
+    const headers = token
+      ? { Authorization: `Bearer ${token}` }
+      : (undefined as unknown as Record<string, string>);
+    const res = await fetch(url, {
+      headers: headers as Record<string, string>,
+    });
+    if (res.ok) {
+      const j = await res.json();
+      setMessages(j.data || []);
+    }
   };
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !booking) return;
     const token = localStorage.getItem('token');
-    if (!token) { toast.error('Faça login'); return; }
     const API = 'http://localhost:3005';
-    const res = await fetch(`${API}/messages`, {
+    const params = new URLSearchParams(window.location.search);
+    const pt = params.get('pt') || '';
+    const url = token
+      ? `${API}/messages`
+      : pt
+      ? `${API}/messages?pt=${encodeURIComponent(pt)}`
+      : `${API}/messages`;
+    const headers: Record<string, string> = token
+      ? { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ BookingID: booking.id, Message: newMessage }),
+      headers,
+      body: JSON.stringify(
+        token || pt
+          ? { BookingID: booking.id, Message: newMessage }
+          : {
+              BookingID: booking.id,
+              Message: newMessage,
+              GuestEmail: guestEmail,
+            }
+      ),
     });
-    if (!res.ok) { toast.error('Erro ao enviar mensagem'); return; }
+    if (!res.ok) {
+      toast.error('Erro ao enviar mensagem');
+      return;
+    }
     setNewMessage('');
     loadMessages(booking.id);
     toast.success('Mensagem enviada!');
@@ -355,10 +591,14 @@ export default function MyBooking() {
 
       <div className='pt-24 pb-12 px-4'>
         <div className='container mx-auto max-w-4xl'>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div className='flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8'>
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">Minhas Reservas</h1>
-              <p className="text-sm text-zinc-500 mt-1">Acompanhe suas reservas atuais e passadas.</p>
+              <h1 className='text-2xl font-semibold tracking-tight text-zinc-900'>
+                Minhas Reservas
+              </h1>
+              <p className='text-sm text-zinc-500 mt-1'>
+                Acompanhe suas reservas atuais e passadas.
+              </p>
             </div>
           </div>
 
@@ -402,7 +642,9 @@ export default function MyBooking() {
                           <div className='space-y-2 text-sm'>
                             <p>Suíte premium com vista para o mar.</p>
                             <p>Check-in a partir das 14h, check-out até 11h.</p>
-                            <p>Itens incluídos: roupa de cama, Wi‑Fi, limpeza.</p>
+                            <p>
+                              Itens incluídos: roupa de cama, Wi‑Fi, limpeza.
+                            </p>
                           </div>
                         </PopoverContent>
                       </Popover>
@@ -410,9 +652,9 @@ export default function MyBooking() {
                   </div>
                 </div>
                 <div>
-                      <div className='grid sm:grid-cols-2 gap-4'>
-                        <div>
-                          <p className='text-sm text-muted-foreground'>Check-in</p>
+                  <div className='grid sm:grid-cols-2 gap-4'>
+                    <div>
+                      <p className='text-sm text-muted-foreground'>Check-in</p>
                       <p className='font-bold'>
                         {format(
                           new Date(booking.check_in),
@@ -439,63 +681,86 @@ export default function MyBooking() {
                       <p className='text-sm text-muted-foreground'>Hóspedes</p>
                       <p className='font-bold'>{booking.number_of_guests}</p>
                     </div>
-                      </div>
-                      <div className='mt-6 w-full'>
-                        <div className='flex flex-col md:flex-row md:items-end md:justify-between gap-3'>
+                  </div>
+                  <div className='mt-6 w-full'>
+                    <div className='flex flex-col md:flex-row md:items-end md:justify-between gap-3'></div>
+                    <div className='mt-6 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
+                      <p className='text-sm md:text-base font-semibold text-muted-foreground tracking-wide'>
+                        Price details
+                      </p>
+                      <div className='mt-3 space-y-2'>
+                        <div className='flex items-center justify-between text-sm text-muted-foreground'>
+                          <span>Hóspedes</span>
+                          <span className='font-medium'>
+                            {booking.number_of_guests}
+                          </span>
                         </div>
-                        <div className='mt-6 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
-                          <p className='text-sm md:text-base font-semibold text-muted-foreground tracking-wide'>
-                            Price details
-                          </p>
-                          <div className='mt-3 space-y-2'>
-                            <div className='flex items-center justify-between text-sm text-muted-foreground'>
-                              <span>Hóspedes</span>
-                              <span className='font-medium'>{booking.number_of_guests}</span>
-                            </div>
-                            <div className='flex items-center justify-between text-sm text-muted-foreground'>
-                              <span>Subtotal</span>
-                              <span className='font-medium'>
-                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
-                                  typeof booking.subtotal_price === 'string' ? parseFloat(booking.subtotal_price) : (booking.subtotal_price ?? 0)
-                                )}
-                              </span>
-                            </div>
-                            <div className='flex items-center justify-between text-sm text-green-600'>
-                              <span>Desconto</span>
-                              <span className='font-medium'>
-                                -{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
-                                  typeof booking.discount_amount === 'string' ? parseFloat(booking.discount_amount) : (booking.discount_amount ?? 0)
-                                )}
-                              </span>
-                            </div>
-                            <div className='border-t border-primary/20 my-3' />
-                            <div className='flex items-center justify-between'>
-                              <span className='text-sm md:text-base font-semibold'>
-                                Total (BRL)
-                              </span>
-                              <span className='text-2xl md:text-3xl font-extrabold text-gradient'>
-                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
-                                  typeof booking.total_price === 'string' ? parseFloat(booking.total_price) : booking.total_price
-                                )}
-                              </span>
-                            </div>
-                            {booking.status === 'confirmed' && (
-                              <>
-                                <Button
-                                  onClick={() => booking && handlePay(booking)}
-                                  className='w-full shadow-ocean mx-auto'
-                                  variant='gradient'
-                                >
-                                  Processar Pagamento
-                                </Button>
-                                {showPayment && (
-                                  <div className='mt-4 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
-                                    <div ref={paymentContainerRef} />
-                                    <Button onClick={confirmPay} className='w-full mt-4' disabled={isPaying}>{isPaying ? 'Processando...' : 'Pagar'}</Button>
-                                  </div>
-                                )}
-                              </>
+                        <div className='flex items-center justify-between text-sm text-muted-foreground'>
+                          <span>Subtotal</span>
+                          <span className='font-medium'>
+                            {new Intl.NumberFormat('pt-BR', {
+                              style: 'currency',
+                              currency: 'BRL',
+                            }).format(
+                              typeof booking.subtotal_price === 'string'
+                                ? parseFloat(booking.subtotal_price)
+                                : booking.subtotal_price ?? 0
                             )}
+                          </span>
+                        </div>
+                        <div className='flex items-center justify-between text-sm text-green-600'>
+                          <span>Desconto</span>
+                          <span className='font-medium'>
+                            -
+                            {new Intl.NumberFormat('pt-BR', {
+                              style: 'currency',
+                              currency: 'BRL',
+                            }).format(
+                              typeof booking.discount_amount === 'string'
+                                ? parseFloat(booking.discount_amount)
+                                : booking.discount_amount ?? 0
+                            )}
+                          </span>
+                        </div>
+                        <div className='border-t border-primary/20 my-3' />
+                        <div className='flex items-center justify-between'>
+                          <span className='text-sm md:text-base font-semibold'>
+                            Total (BRL)
+                          </span>
+                          <span className='text-2xl md:text-3xl font-extrabold text-gradient'>
+                            {new Intl.NumberFormat('pt-BR', {
+                              style: 'currency',
+                              currency: 'BRL',
+                            }).format(
+                              typeof booking.total_price === 'string'
+                                ? parseFloat(booking.total_price)
+                                : booking.total_price
+                            )}
+                          </span>
+                        </div>
+                        {booking.status === 'confirmed' && (
+                          <>
+                            <Button
+                              onClick={() => booking && handlePay(booking)}
+                              className='w-full shadow-ocean mx-auto'
+                              variant='gradient'
+                            >
+                              Processar Pagamento
+                            </Button>
+                            {showPayment && (
+                              <div className='mt-4 w-full rounded-xl border border-primary/20 bg-card/40 p-6 shadow-ocean'>
+                                <div ref={paymentContainerRef} />
+                                <Button
+                                  onClick={confirmPay}
+                                  className='w-full mt-4'
+                                  disabled={isPaying}
+                                >
+                                  {isPaying ? 'Processando...' : 'Pagar'}
+                                </Button>
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                       <p className='mt-3 text-xs md:text-sm text-muted-foreground'>
                         Price breakdown
@@ -512,7 +777,10 @@ export default function MyBooking() {
               <CardTitle>Mensagens</CardTitle>
             </CardHeader>
             <CardContent>
-              <div ref={messagesContainerRef} className='space-y-4 mb-4 max-h-96 overflow-y-auto'>
+              <div
+                ref={messagesContainerRef}
+                className='space-y-4 mb-4 max-h-96 overflow-y-auto'
+              >
                 {messages.length === 0 ? (
                   <p className='text-center text-muted-foreground py-8'>
                     Nenhuma mensagem ainda. Envie uma mensagem se tiver alguma
@@ -521,31 +789,72 @@ export default function MyBooking() {
                 ) : (
                   messages.map((msg) => {
                     let special: Record<string, unknown> | null = null;
-                    try { special = JSON.parse(msg.message) as Record<string, unknown>; } catch (_e) { special = null; }
-                    const isPayment = Boolean(special && (special as Record<string, unknown>).type === 'payment_invite');
+                    try {
+                      special = JSON.parse(msg.message) as Record<
+                        string,
+                        unknown
+                      >;
+                    } catch (_e) {
+                      special = null;
+                    }
+                    const isPayment = Boolean(
+                      special &&
+                        (special as Record<string, unknown>).type ===
+                          'payment_invite'
+                    );
                     const isOwnerMsg = Boolean(msg.is_from_owner);
                     return (
-                      <div key={msg.id} className={`flex items-end gap-2 ${isOwnerMsg ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        key={msg.id}
+                        className={`flex items-end gap-2 ${
+                          isOwnerMsg ? 'justify-end' : 'justify-start'
+                        }`}
+                      >
                         {!isOwnerMsg && (
-                          <div className='h-6 w-6 sm:h-7 sm:w-7 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-[10px] font-bold shadow'>H</div>
+                          <div className='h-6 w-6 sm:h-7 sm:w-7 rounded-full bg-accent text-accent-foreground flex items-center justify-center text-[10px] font-bold shadow'>
+                            H
+                          </div>
                         )}
-                        <div className={`max-w-[85%] sm:max-w-[70%] px-3 py-2 rounded-2xl text-xs sm:text-sm shadow ${isOwnerMsg ? 'bg-primary text-primary-foreground rounded-br-sm' : 'bg-accent text-accent-foreground rounded-bl-sm'}`}>
+                        <div
+                          className={`max-w-[85%] sm:max-w-[70%] px-3 py-2 rounded-2xl text-xs sm:text-sm shadow ${
+                            isOwnerMsg
+                              ? 'bg-primary text-primary-foreground rounded-br-sm'
+                              : 'bg-accent text-accent-foreground rounded-bl-sm'
+                          }`}
+                        >
                           {isPayment ? (
                             <div className='space-y-3'>
-                              <div className='font-medium'>{String((special as Record<string, unknown>).text ?? '')}</div>
-                              <Button onClick={handlePay} className='w-full' variant='gradient'>
-                                {String((special as Record<string, unknown>).cta ?? 'Pagar agora')}
+                              <div className='font-medium'>
+                                {String(
+                                  (special as Record<string, unknown>).text ??
+                                    ''
+                                )}
+                              </div>
+                              <Button
+                                onClick={handlePay}
+                                className='w-full'
+                                variant='gradient'
+                              >
+                                {String(
+                                  (special as Record<string, unknown>).cta ??
+                                    'Pagar agora'
+                                )}
                               </Button>
                             </div>
                           ) : (
                             <div className='font-medium'>{msg.message}</div>
                           )}
                           <div className='mt-1 text-[10px] text-white/70 text-right'>
-                            {new Date(msg.created_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
+                            {new Date(msg.created_at).toLocaleTimeString(
+                              'pt-BR',
+                              { hour: '2-digit', minute: '2-digit' }
+                            )}
                           </div>
                         </div>
                         {isOwnerMsg && (
-                          <div className='h-6 w-6 sm:h-7 sm:w-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shadow'>P</div>
+                          <div className='h-6 w-6 sm:h-7 sm:w-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shadow'>
+                            P
+                          </div>
                         )}
                       </div>
                     );
@@ -554,18 +863,18 @@ export default function MyBooking() {
               </div>
 
               <div className='flex gap-2'>
-              <Textarea
-                placeholder='Digite sua mensagem...'
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                rows={3}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                  }
-                }}
-              />
+                <Textarea
+                  placeholder='Digite sua mensagem...'
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  rows={3}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                />
                 <Button onClick={sendMessage}>
                   <Send className='h-4 w-4' />
                 </Button>
@@ -578,32 +887,52 @@ export default function MyBooking() {
               <h2 className='font-medium text-zinc-900'>Reservas Passadas</h2>
             </div>
             <div className='p-6 space-y-4'>
-              {allBookings.filter(b => new Date(b.check_out) < new Date()).map((b) => (
-                <div key={b.id} className='p-4 border border-zinc-200 rounded-lg'>
-                  <div className='flex items-center justify-between'>
-                    <div className='font-medium text-zinc-900'>Reserva #{b.id.slice(0,8)}</div>
-                    {getStatusBadge(b.status)}
+              {allBookings
+                .filter((b) => new Date(b.check_out) < new Date())
+                .map((b) => (
+                  <div
+                    key={b.id}
+                    className='p-4 border border-zinc-200 rounded-lg'
+                  >
+                    <div className='flex items-center justify-between'>
+                      <div className='font-medium text-zinc-900'>
+                        Reserva #{b.id.slice(0, 8)}
+                      </div>
+                      {getStatusBadge(b.status)}
+                    </div>
+                    <div className='grid grid-cols-2 gap-3 mt-3 text-sm'>
+                      <div>
+                        <div className='text-zinc-500'>Check-in</div>
+                        <div className='font-medium'>
+                          {format(new Date(b.check_in), 'dd MMM yyyy', {
+                            locale: ptBR,
+                          })}
+                        </div>
+                      </div>
+                      <div>
+                        <div className='text-zinc-500'>Check-out</div>
+                        <div className='font-medium'>
+                          {format(new Date(b.check_out), 'dd MMM yyyy', {
+                            locale: ptBR,
+                          })}
+                        </div>
+                      </div>
+                      <div>
+                        <div className='text-zinc-500'>Hóspedes</div>
+                        <div className='font-medium'>{b.number_of_guests}</div>
+                      </div>
+                      <div>
+                        <div className='text-zinc-500'>Total</div>
+                        <div className='font-medium'>
+                          R${' '}
+                          {Number(b.total_price).toLocaleString('pt-BR', {
+                            minimumFractionDigits: 2,
+                          })}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className='grid grid-cols-2 gap-3 mt-3 text-sm'>
-                    <div>
-                      <div className='text-zinc-500'>Check-in</div>
-                      <div className='font-medium'>{format(new Date(b.check_in), 'dd MMM yyyy', { locale: ptBR })}</div>
-                    </div>
-                    <div>
-                      <div className='text-zinc-500'>Check-out</div>
-                      <div className='font-medium'>{format(new Date(b.check_out), 'dd MMM yyyy', { locale: ptBR })}</div>
-                    </div>
-                    <div>
-                      <div className='text-zinc-500'>Hóspedes</div>
-                      <div className='font-medium'>{b.number_of_guests}</div>
-                    </div>
-                    <div>
-                      <div className='text-zinc-500'>Total</div>
-                      <div className='font-medium'>R$ {Number(b.total_price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
           </div>
         </div>

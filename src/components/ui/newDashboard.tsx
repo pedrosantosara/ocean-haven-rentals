@@ -84,6 +84,12 @@ export const NewDashboard: React.FC<{
   const [lastMessagePreview, setLastMessagePreview] = useState<
     Record<string, { text: string; created_at: string }>
   >({});
+  const [recentMessagesPreview, setRecentMessagesPreview] = useState<
+    Record<
+      string,
+      Array<{ text: string; created_at: string; is_from_owner: boolean }>
+    >
+  >({});
 
   const monthNames = [
     'Janeiro',
@@ -168,6 +174,7 @@ export const NewDashboard: React.FC<{
     const ids = pendingReservations.map((r) => r.id);
     if (ids.length === 0) {
       setLastMessagePreview({});
+      setRecentMessagesPreview({});
       return;
     }
     Promise.all(
@@ -210,13 +217,65 @@ export const NewDashboard: React.FC<{
       })
     ).then((list) => {
       const map: Record<string, { text: string; created_at: string }> = {};
+      const mapRecent: Record<
+        string,
+        Array<{ text: string; created_at: string; is_from_owner: boolean }>
+      > = {};
       list.forEach((entry) => {
         if (entry && entry.text) {
           map[entry.id] = { text: entry.text, created_at: entry.created_at };
+          mapRecent[entry.id] = entry.recent;
         }
       });
       setLastMessagePreview(map);
+      setRecentMessagesPreview(mapRecent);
     });
+  }, [pendingReservations]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const conns: Array<WebSocket> = [];
+    pendingReservations.forEach((r) => {
+      const wsUrl = `ws://localhost:3005/ws/messages?booking_id=${r.id}&token=${token}`;
+      const ws = new WebSocket(wsUrl);
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.type === 'message' && data.data) {
+            const d = data.data as {
+              booking_id: string;
+              message: string;
+              created_at: string;
+              is_from_owner: boolean;
+            };
+            setLastMessagePreview((prev) => ({
+              ...prev,
+              [d.booking_id]: { text: d.message, created_at: d.created_at },
+            }));
+            setRecentMessagesPreview((prev) => {
+              const cur = prev[d.booking_id] || [];
+              const next = [
+                ...cur,
+                {
+                  text: d.message,
+                  created_at: d.created_at,
+                  is_from_owner: d.is_from_owner,
+                },
+              ];
+              const trimmed = next.slice(Math.max(next.length - 3, 0));
+              return { ...prev, [d.booking_id]: trimmed };
+            });
+          }
+        } catch (_e) {
+          void _e;
+        }
+      };
+      conns.push(ws);
+    });
+    return () => {
+      conns.forEach((ws) => ws.close());
+    };
   }, [pendingReservations]);
 
   const loadDashboardData = async () => {
@@ -785,31 +844,47 @@ export const NewDashboard: React.FC<{
                     </div>
                     <div className='bg-zinc-50 rounded-lg p-4 mb-6 border border-zinc-100'>
                       <p className='text-xs font-medium text-zinc-400 mb-2 uppercase tracking-wider'>
-                        Mensagem do Hóspede
+                        Conversa
                       </p>
-                      {lastMessagePreview[r.id]?.text && (
-                        <div className='flex items-center justify-between mb-2'>
-                          <div className='text-sm text-zinc-600 truncate max-w-[70%]'>
-                            {lastMessagePreview[r.id].text}
-                          </div>
-                          <button
-                            className='text-xs text-primary hover:underline'
-                            onClick={() => {
-                              if (onNavClick) onNavClick('messages');
-                              const dest = r.guestEmail
-                                ? `/dashboard?guest_email=${encodeURIComponent(
-                                    r.guestEmail
-                                  )}`
-                                : `/dashboard?booking_id=${encodeURIComponent(
-                                    r.id
-                                  )}`;
-                              navigate(dest);
-                            }}
-                          >
-                            Abrir conversa
-                          </button>
+                      {recentMessagesPreview[r.id] &&
+                      recentMessagesPreview[r.id].length > 0 ? (
+                        <div className='space-y-2 mb-2'>
+                          {recentMessagesPreview[r.id].map((m, idx) => (
+                            <div
+                              key={`${r.id}-${idx}`}
+                              className={`text-xs ${
+                                m.is_from_owner
+                                  ? 'text-zinc-700'
+                                  : 'text-zinc-600'
+                              }`}
+                            >
+                              {m.text}
+                            </div>
+                          ))}
                         </div>
-                      )}
+                      ) : lastMessagePreview[r.id]?.text ? (
+                        <div className='text-sm text-zinc-600 truncate max-w-[70%] mb-2'>
+                          {lastMessagePreview[r.id].text}
+                        </div>
+                      ) : null}
+                      <div className='flex items-center justify-end mb-2'>
+                        <button
+                          className='text-xs text-primary hover:underline'
+                          onClick={() => {
+                            if (onNavClick) onNavClick('messages');
+                            const dest = r.guestEmail
+                              ? `/dashboard?guest_email=${encodeURIComponent(
+                                  r.guestEmail
+                                )}`
+                              : `/dashboard?booking_id=${encodeURIComponent(
+                                  r.id
+                                )}`;
+                            navigate(dest);
+                          }}
+                        >
+                          Abrir conversa
+                        </button>
+                      </div>
                       <div className='mt-3 flex gap-2'>
                         <input
                           type='text'

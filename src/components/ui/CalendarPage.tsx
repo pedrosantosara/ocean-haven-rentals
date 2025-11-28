@@ -563,20 +563,25 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
               >
                 Fechar
               </button>
-              {selectedEvent.type !== 'block' && selectedEvent.source === 'Site' && (
-                <button
-                  onClick={() => {
-                    if (selectedEvent.id) {
-                      if (onNavClick) onNavClick('messages');
-                      navigate(`/dashboard?booking_id=${encodeURIComponent(selectedEvent.id)}`);
-                    }
-                  }}
-                  className='flex-1 px-4 py-2 bg-zinc-900 text-white rounded-md text-sm font-medium hover:bg-zinc-800 transition-colors'
-                >
-                  <MessageSquare className='w-4 h-4 inline mr-2' />
-                  Conversar
-                </button>
-              )}
+              {selectedEvent.type !== 'block' &&
+                selectedEvent.source === 'Site' && (
+                  <button
+                    onClick={() => {
+                      if (selectedEvent.id) {
+                        if (onNavClick) onNavClick('messages');
+                        navigate(
+                          `/dashboard?booking_id=${encodeURIComponent(
+                            selectedEvent.id
+                          )}`
+                        );
+                      }
+                    }}
+                    className='flex-1 px-4 py-2 bg-zinc-900 text-white rounded-md text-sm font-medium hover:bg-zinc-800 transition-colors'
+                  >
+                    <MessageSquare className='w-4 h-4 inline mr-2' />
+                    Conversar
+                  </button>
+                )}
             </div>
           </div>
         </div>

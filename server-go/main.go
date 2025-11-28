@@ -125,33 +125,100 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, 200, map[string]string{"token": str})
 }
 
+// Allows a guest without password to retrieve their booking and receive a session token
+func (s *Server) handleGuestFindBooking(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Email, BookingID string }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	bid := strings.TrimSpace(body.BookingID)
+	if email == "" || bid == "" {
+		jsonResp(w, 400, map[string]string{"error": "invalid_input"})
+		return
+	}
+	var guestEmail, customerID string
+	if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_email,''), COALESCE(customer_id,'') FROM bookings WHERE id=$1", bid).Scan(&guestEmail, &customerID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonResp(w, 404, map[string]string{"error": "not_found"})
+			return
+		}
+		jsonResp(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(guestEmail)) != email || guestEmail == "" {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	var userID string
+	var isOwner bool
+	if err := s.pool.QueryRow(r.Context(), "SELECT id, COALESCE(is_owner,false) FROM users WHERE email=$1", guestEmail).Scan(&userID, &isOwner); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			var buf [16]byte
+			_, _ = rand.Read(buf[:])
+			inv := hex.EncodeToString(buf[:])
+			h, _ := bcrypt.GenerateFromPassword([]byte(inv), 10)
+			if _, err2 := s.pool.Exec(r.Context(), "INSERT INTO users (email, password_hash, full_name, is_owner, invite_token) VALUES ($1,$2,'',false,$3)", guestEmail, string(h), inv); err2 != nil {
+				jsonResp(w, 500, map[string]string{"error": err2.Error()})
+				return
+			}
+			_ = s.pool.QueryRow(r.Context(), "SELECT id FROM users WHERE email=$1", guestEmail).Scan(&userID)
+		} else {
+			jsonResp(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	tkn := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"email": guestEmail, "is_owner": false, "exp": time.Now().Add(7 * 24 * time.Hour).Unix()})
+	str, _ := tkn.SignedString([]byte(s.jwtSecret))
+	jsonResp(w, 200, map[string]any{"token": str, "booking_id": bid})
+}
+
 func (s *Server) handleCompleteSignup(w http.ResponseWriter, r *http.Request) {
-    var body struct{
-        Email    string
-        Token    string
-        Password string
-        FullName string
-    }
-    _ = json.NewDecoder(r.Body).Decode(&body)
-    if strings.TrimSpace(body.Email) == "" || strings.TrimSpace(body.Token) == "" || strings.TrimSpace(body.Password) == "" {
-        jsonResp(w, 400, map[string]string{"error": "invalid_input"})
-        return
-    }
-    var inv string
-    if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(invite_token,'') FROM users WHERE email=$1", body.Email).Scan(&inv); err != nil {
-        jsonResp(w, 400, map[string]string{"error": "user_not_found"})
-        return
-    }
-    if inv == "" || inv != body.Token {
-        jsonResp(w, 403, map[string]string{"error": "invalid_token"})
-        return
-    }
-    hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), 10)
-    if _, err := s.pool.Exec(r.Context(), "UPDATE users SET password_hash=$1, full_name=COALESCE($2, full_name), invite_token=NULL WHERE email=$3", string(hash), body.FullName, body.Email); err != nil {
-        jsonResp(w, 500, map[string]string{"error": err.Error()})
-        return
-    }
-    jsonResp(w, 200, map[string]bool{"success": true})
+	var body struct {
+		Email    string
+		Token    string
+		Password string
+		FullName string
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if strings.TrimSpace(body.Email) == "" || strings.TrimSpace(body.Token) == "" || strings.TrimSpace(body.Password) == "" {
+		jsonResp(w, 400, map[string]string{"error": "invalid_input"})
+		return
+	}
+	var inv string
+	if err := s.pool.QueryRow(r.Context(), "SELECT COALESCE(invite_token,'') FROM users WHERE email=$1", body.Email).Scan(&inv); err != nil {
+		jsonResp(w, 400, map[string]string{"error": "user_not_found"})
+		return
+	}
+	if inv == "" || inv != body.Token {
+		jsonResp(w, 403, map[string]string{"error": "invalid_token"})
+		return
+	}
+	hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), 10)
+	if _, err := s.pool.Exec(r.Context(), "UPDATE users SET password_hash=$1, full_name=COALESCE($2, full_name), invite_token=NULL WHERE email=$3", string(hash), body.FullName, body.Email); err != nil {
+		jsonResp(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResp(w, 200, map[string]bool{"success": true})
+}
+
+func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
+	c := getClaims(r)
+	email := fmt.Sprintf("%v", c["email"])
+	if strings.TrimSpace(email) == "" {
+		jsonResp(w, 401, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var body struct{ Password, FullName string }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if strings.TrimSpace(body.Password) == "" {
+		jsonResp(w, 400, map[string]string{"error": "invalid_input"})
+		return
+	}
+	hash, _ := bcrypt.GenerateFromPassword([]byte(body.Password), 10)
+	if _, err := s.pool.Exec(r.Context(), "UPDATE users SET password_hash=$1, full_name=COALESCE($2, full_name), invite_token=NULL WHERE email=$3", string(hash), body.FullName, email); err != nil {
+		jsonResp(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	jsonResp(w, 200, map[string]bool{"success": true})
 }
 
 func getClaims(r *http.Request) jwt.MapClaims {
@@ -303,15 +370,15 @@ func (s *Server) refreshMergedICS(ctx context.Context) {
 	if err != nil {
 		return
 	}
-    for bro.Next() {
-        var id, guest, status string
-        var ci, co time.Time
-        if err := bro.Scan(&id, &guest, &ci, &co, &status); err != nil {
-            return
-        }
-        if status == "rejected" || status == "cancelled" {
-            continue
-        }
+	for bro.Next() {
+		var id, guest, status string
+		var ci, co time.Time
+		if err := bro.Scan(&id, &guest, &ci, &co, &status); err != nil {
+			return
+		}
+		if status == "rejected" || status == "cancelled" {
+			continue
+		}
 		var sb strings.Builder
 		sb.WriteString("BEGIN:VEVENT\n")
 
@@ -769,6 +836,8 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	_, _ = s.pool.Exec(r.Context(), "INSERT INTO messages (booking_id, sender_email, is_from_owner, message) VALUES ($1,$2,$3,$4)", id, c["email"], true, string(msgStr))
 	payload, _ := json.Marshal(map[string]any{"type": "message", "data": map[string]any{"booking_id": id, "sender_email": c["email"], "is_from_owner": true, "message": string(msgStr), "created_at": time.Now().Format(time.RFC3339)}})
 	s.hub.Broadcast(id, payload)
+	statusPayload, _ := json.Marshal(map[string]any{"type": "status_update", "data": map[string]any{"booking_id": id, "status": "confirmed"}})
+	s.hub.Broadcast(id, statusPayload)
 	if s.email != nil && guestEmail != "" {
 		_ = s.email.SendChatNotificationEmail(guestEmail, emailpkg.ChatMessageEmailData{SenderName: "Ocean Haven", Message: "Sua reserva foi aprovada! Para pagar, acesse: " + checkoutURL, Timestamp: time.Now().Format(time.RFC3339)})
 	}
@@ -791,65 +860,111 @@ func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
 		jsonResp(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
+	statusPayload, _ := json.Marshal(map[string]any{"type": "status_update", "data": map[string]any{"booking_id": id, "status": "cancelled"}})
+	s.hub.Broadcast(id, statusPayload)
 	jsonResp(w, 200, map[string]string{"status": "rejected"})
 }
 
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
-    c := getClaims(r)
-    var isOwner bool
-    if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil {
-        jsonResp(w, 500, map[string]string{"error": err.Error()})
-        return
-    }
-    if !isOwner {
-        jsonResp(w, 403, map[string]string{"error": "forbidden"})
-        return
-    }
-    id := mux.Vars(r)["id"]
-    var guestName, guestEmail, customerEmail string
-    var ci, co time.Time
-    var guests int
-    var total float64
-    _ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(b.guest_name,''), COALESCE(b.guest_email,''), COALESCE(u.email,''), b.check_in, b.check_out, COALESCE(b.number_of_guests,0), COALESCE(b.total_price,0)::float8 FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", id).Scan(&guestName, &guestEmail, &customerEmail, &ci, &co, &guests, &total)
-    if _, err := s.pool.Exec(r.Context(), "UPDATE bookings SET status='cancelled', updated_at=now() WHERE id=$1", id); err != nil {
-        jsonResp(w, 500, map[string]string{"error": err.Error()})
-        return
-    }
-    if s.email != nil {
-        var to string = guestEmail
-        if to == "" { to = customerEmail }
-        if to != "" {
-            _ = s.email.SendBookingCancelledEmail(to, emailpkg.BookingEmailData{Name: guestName, CheckIn: ci.Format("2006-01-02"), CheckOut: co.Format("2006-01-02"), Guests: guests, TotalPrice: total})
-        }
-    }
-    s.refreshMergedICS(context.Background())
-    jsonResp(w, 200, map[string]string{"status": "cancelled"})
-}
-
-func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	c := getClaims(r)
-	var body struct{ BookingID, Message string }
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if body.BookingID == "" || body.Message == "" {
-		jsonResp(w, 400, map[string]string{"error": "invalid_input"})
-		return
-	}
 	var isOwner bool
 	if err := s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner); err != nil {
 		jsonResp(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
 	if !isOwner {
+		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
+	id := mux.Vars(r)["id"]
+	var guestName, guestEmail, customerEmail string
+	var ci, co time.Time
+	var guests int
+	var total float64
+	_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(b.guest_name,''), COALESCE(b.guest_email,''), COALESCE(u.email,''), b.check_in, b.check_out, COALESCE(b.number_of_guests,0), COALESCE(b.total_price,0)::float8 FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", id).Scan(&guestName, &guestEmail, &customerEmail, &ci, &co, &guests, &total)
+	if _, err := s.pool.Exec(r.Context(), "UPDATE bookings SET status='cancelled', updated_at=now() WHERE id=$1", id); err != nil {
+		jsonResp(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if s.email != nil {
+		var to string = guestEmail
+		if to == "" {
+			to = customerEmail
+		}
+		if to != "" {
+			_ = s.email.SendBookingCancelledEmail(to, emailpkg.BookingEmailData{Name: guestName, CheckIn: ci.Format("2006-01-02"), CheckOut: co.Format("2006-01-02"), Guests: guests, TotalPrice: total})
+		}
+	}
+	s.refreshMergedICS(context.Background())
+	statusPayload, _ := json.Marshal(map[string]any{"type": "status_update", "data": map[string]any{"booking_id": id, "status": "cancelled"}})
+	s.hub.Broadcast(id, statusPayload)
+	jsonResp(w, 200, map[string]string{"status": "cancelled"})
+}
+
+func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
+	var body struct{ BookingID, Message, GuestEmail string }
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.BookingID == "" || body.Message == "" {
+		jsonResp(w, 400, map[string]string{"error": "invalid_input"})
+		return
+	}
+	// Support either JWT (Authorization) or payment token (pt) for guests
+	var isOwner bool
+	var senderEmail string
+	hdr := r.Header.Get("Authorization")
+	pt := r.URL.Query().Get("pt")
+	if strings.HasPrefix(hdr, "Bearer ") {
+		tokenStr := strings.TrimPrefix(hdr, "Bearer ")
+		tkn, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) { return []byte(s.jwtSecret), nil })
+		if err != nil || !tkn.Valid {
+			jsonResp(w, 401, map[string]string{"error": "invalid_token"})
+			return
+		}
+		claims, ok := tkn.Claims.(jwt.MapClaims)
+		if !ok {
+			jsonResp(w, 401, map[string]string{"error": "invalid_token"})
+			return
+		}
+		if v, ok := claims["is_owner"].(bool); ok {
+			isOwner = v
+		} else {
+			isOwner = false
+		}
 		var customerEmail, guestEmail string
 		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", body.BookingID).Scan(&customerEmail, &guestEmail)
-		email := fmt.Sprintf("%v", c["email"])
-		if email != customerEmail && email != guestEmail {
+		email := fmt.Sprintf("%v", claims["email"])
+		if !isOwner && email != customerEmail && email != guestEmail {
 			jsonResp(w, 403, map[string]string{"error": "forbidden"})
 			return
 		}
+		senderEmail = email
+	} else if pt != "" {
+		var paymentToken, guestEmail string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(payment_token,''), COALESCE(guest_email,'') FROM bookings WHERE id=$1", body.BookingID).Scan(&paymentToken, &guestEmail)
+		if pt != paymentToken || paymentToken == "" {
+			jsonResp(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		isOwner = false
+		senderEmail = guestEmail
+	} else {
+		// Fallback: allow guest session based on provided GuestEmail matching booking.guest_email
+		ge := strings.TrimSpace(strings.ToLower(body.GuestEmail))
+		if ge == "" {
+			jsonResp(w, 401, map[string]string{"error": "unauthorized"})
+			return
+		}
+		var bookingGuestEmail string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_email,'') FROM bookings WHERE id=$1", body.BookingID).Scan(&bookingGuestEmail)
+		if strings.TrimSpace(strings.ToLower(bookingGuestEmail)) != ge || bookingGuestEmail == "" {
+			jsonResp(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		isOwner = false
+		senderEmail = bookingGuestEmail
 	}
 
-	if _, err := s.pool.Exec(r.Context(), "INSERT INTO messages (booking_id, sender_email, is_from_owner, message) VALUES ($1,$2,$3,$4)", body.BookingID, c["email"], isOwner, body.Message); err != nil {
+	if _, err := s.pool.Exec(r.Context(), "INSERT INTO messages (booking_id, sender_email, is_from_owner, message) VALUES ($1,$2,$3,$4)", body.BookingID, senderEmail, isOwner, body.Message); err != nil {
 		jsonResp(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
@@ -877,7 +992,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			senderName := fmt.Sprintf("%v", c["email"])
+			senderName := senderEmail
 			bookingID := body.BookingID
 
 			timer := time.AfterFunc(3*time.Minute, func() {
@@ -900,25 +1015,62 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 			s.chatTimers.Store(key, timer)
 		}
 	}
-	payload, _ := json.Marshal(map[string]any{"type": "message", "data": map[string]any{"booking_id": body.BookingID, "sender_email": c["email"], "is_from_owner": isOwner, "message": body.Message, "created_at": time.Now().Format(time.RFC3339)}})
+	payload, _ := json.Marshal(map[string]any{"type": "message", "data": map[string]any{"booking_id": body.BookingID, "sender_email": senderEmail, "is_from_owner": isOwner, "message": body.Message, "created_at": time.Now().Format(time.RFC3339)}})
 	s.hub.Broadcast(body.BookingID, payload)
 	jsonResp(w, 200, map[string]bool{"success": true})
 }
 
 func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
-	c := getClaims(r)
 	bookingID := r.URL.Query().Get("booking_id")
 	if bookingID == "" {
 		jsonResp(w, 400, map[string]string{"error": "missing_booking_id"})
 		return
 	}
-	var customerEmail, guestEmail, ownerEmail string
-	_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,''), COALESCE(o.email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id LEFT JOIN users o ON b.owner_id=o.id WHERE b.id=$1", bookingID).Scan(&customerEmail, &guestEmail, &ownerEmail)
-	var isOwner bool
-	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", c["email"]).Scan(&isOwner)
-	email := fmt.Sprintf("%v", c["email"])
-	if !isOwner && email != customerEmail && email != guestEmail {
-		jsonResp(w, 403, map[string]string{"error": "forbidden"})
+	// Authorize via JWT or payment token
+	hdr := r.Header.Get("Authorization")
+	pt := r.URL.Query().Get("pt")
+	ge := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("guest_email")))
+	if strings.HasPrefix(hdr, "Bearer ") {
+		tokenStr := strings.TrimPrefix(hdr, "Bearer ")
+		tkn, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) { return []byte(s.jwtSecret), nil })
+		if err != nil || !tkn.Valid {
+			jsonResp(w, 401, map[string]string{"error": "invalid_token"})
+			return
+		}
+		claims, ok := tkn.Claims.(jwt.MapClaims)
+		if !ok {
+			jsonResp(w, 401, map[string]string{"error": "invalid_token"})
+			return
+		}
+		var customerEmail, guestEmail, ownerEmail string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,''), COALESCE(o.email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id LEFT JOIN users o ON b.owner_id=o.id WHERE b.id=$1", bookingID).Scan(&customerEmail, &guestEmail, &ownerEmail)
+		var isOwner bool
+		if v, ok := claims["is_owner"].(bool); ok {
+			isOwner = v
+		} else {
+			isOwner = false
+		}
+		email := fmt.Sprintf("%v", claims["email"])
+		if !isOwner && email != customerEmail && email != guestEmail {
+			jsonResp(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+	} else if pt != "" {
+		var paymentToken string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(payment_token,'') FROM bookings WHERE id=$1", bookingID).Scan(&paymentToken)
+		if pt != paymentToken || paymentToken == "" {
+			jsonResp(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+	} else if ge != "" {
+		var bookingGuestEmail string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_email,'') FROM bookings WHERE id=$1", bookingID).Scan(&bookingGuestEmail)
+		if strings.ToLower(strings.TrimSpace(bookingGuestEmail)) != ge || bookingGuestEmail == "" {
+			jsonResp(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+	} else {
+		jsonResp(w, 401, map[string]string{"error": "unauthorized"})
 		return
 	}
 	rows, err := s.pool.Query(r.Context(), "SELECT id, booking_id, sender_email, is_from_owner, message, created_at FROM messages WHERE booking_id=$1 ORDER BY created_at ASC", bookingID)
@@ -1349,27 +1501,53 @@ func (h *Hub) Broadcast(room string, payload []byte) {
 func (s *Server) handleWSMessages(w http.ResponseWriter, r *http.Request) {
 	bookingID := r.URL.Query().Get("booking_id")
 	tokenStr := r.URL.Query().Get("token")
-	if bookingID == "" || tokenStr == "" {
+	pt := r.URL.Query().Get("pt")
+	ge := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("guest_email")))
+	if bookingID == "" {
 		http.Error(w, "missing params", http.StatusBadRequest)
 		return
 	}
-	tkn, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) { return []byte(s.jwtSecret), nil })
-	if err != nil || !tkn.Valid {
+	if tokenStr != "" {
+		tkn, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) { return []byte(s.jwtSecret), nil })
+		if err != nil || !tkn.Valid {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		claims, ok := tkn.Claims.(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var isOwner bool
+		if v, ok := claims["is_owner"].(bool); ok {
+			isOwner = v
+		} else {
+			isOwner = false
+		}
+		var customerEmail, guestEmail string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", bookingID).Scan(&customerEmail, &guestEmail)
+		email := fmt.Sprintf("%v", claims["email"])
+		if !isOwner && email != customerEmail && email != guestEmail {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	} else if pt != "" {
+		var paymentToken string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(payment_token,'') FROM bookings WHERE id=$1", bookingID).Scan(&paymentToken)
+		if pt != paymentToken || paymentToken == "" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		// guests authorized via payment token can read ws events
+	} else if ge != "" {
+		var bookingGuestEmail string
+		_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(guest_email,'') FROM bookings WHERE id=$1", bookingID).Scan(&bookingGuestEmail)
+		if strings.ToLower(strings.TrimSpace(bookingGuestEmail)) != ge || bookingGuestEmail == "" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	} else {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	claims, ok := tkn.Claims.(jwt.MapClaims)
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	var isOwner bool
-	_ = s.pool.QueryRow(r.Context(), "SELECT is_owner FROM users WHERE email=$1", claims["email"]).Scan(&isOwner)
-	var customerEmail, guestEmail string
-	_ = s.pool.QueryRow(r.Context(), "SELECT COALESCE(u.email,''), COALESCE(b.guest_email,'') FROM bookings b LEFT JOIN users u ON b.customer_id=u.id WHERE b.id=$1", bookingID).Scan(&customerEmail, &guestEmail)
-	email := fmt.Sprintf("%v", claims["email"])
-	if !isOwner && email != customerEmail && email != guestEmail {
-		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
@@ -1445,8 +1623,9 @@ func main() {
 	// Explicit OPTIONS handlers for known routes to avoid 405 preflight failures
 	r.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/auth/register", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+	r.HandleFunc("/auth/login", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/auth/me", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
-	r.HandleFunc("/ical", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
+	r.HandleFunc("/auth/set-password", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/ical/{id}", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/ical/sync", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
 	r.HandleFunc("/ical/last-sync", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }).Methods(http.MethodOptions)
@@ -1487,6 +1666,7 @@ func main() {
 	r.HandleFunc("/auth/login", s.handleLogin).Methods("POST")
 	r.Handle("/auth/me", s.authMiddleware(http.HandlerFunc(s.handleMe))).Methods("GET")
 	r.HandleFunc("/auth/complete", s.handleCompleteSignup).Methods("POST")
+	r.HandleFunc("/guest/find-booking", s.handleGuestFindBooking).Methods("POST")
 	r.Handle("/ical", s.authMiddleware(http.HandlerFunc(s.handleAddIcal))).Methods("POST")
 	r.Handle("/ical", s.authMiddleware(http.HandlerFunc(s.handleListIcal))).Methods("GET")
 	r.Handle("/ical/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteIcal))).Methods("DELETE")
@@ -1533,12 +1713,13 @@ func main() {
 	r.Handle("/bookings/mine", s.authMiddleware(http.HandlerFunc(s.handleListBookingsMine))).Methods("GET")
 	r.Handle("/bookings/{id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApprove))).Methods("POST")
 	r.Handle("/bookings/{id}/reject", s.authMiddleware(http.HandlerFunc(s.handleReject))).Methods("POST")
-    r.Handle("/bookings/{id}/cancel", s.authMiddleware(http.HandlerFunc(s.handleCancel))).Methods("POST")
+	r.Handle("/bookings/{id}/cancel", s.authMiddleware(http.HandlerFunc(s.handleCancel))).Methods("POST")
 	r.HandleFunc("/bookings/{id}/payment-intent", s.handleCreatePaymentIntent).Methods("POST")
 	r.HandleFunc("/bookings/{id}/checkout", s.handleCreateCheckoutSession).Methods("POST")
 	r.HandleFunc("/bookings/{id}/mark-paid", s.handleMarkPaid).Methods("POST")
-	r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handlePostMessage))).Methods("POST")
-	r.Handle("/messages", s.authMiddleware(http.HandlerFunc(s.handleGetMessages))).Methods("GET")
+	r.Handle("/auth/set-password", s.authMiddleware(http.HandlerFunc(s.handleSetPassword))).Methods("POST")
+	r.HandleFunc("/messages", s.handlePostMessage).Methods("POST")
+	r.HandleFunc("/messages", s.handleGetMessages).Methods("GET")
 	r.HandleFunc("/ws/messages", s.handleWSMessages).Methods("GET")
 	r.Handle("/stats/dashboard", s.authMiddleware(http.HandlerFunc(s.handleDashboardStats))).Methods("GET")
 	r.Handle("/settings", s.authMiddleware(http.HandlerFunc(s.handleGetSettings))).Methods("GET")
@@ -1553,8 +1734,8 @@ func main() {
 	if port == "" {
 		port = "3005"
 	}
-    log.Printf("Servidor iniciado na porta %s", port)
-    log.Fatal(http.ListenAndServe(":"+port, r))
+	log.Printf("Servidor iniciado na porta %s", port)
+	log.Fatal(http.ListenAndServe(":"+port, r))
 }
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	c := getClaims(r)

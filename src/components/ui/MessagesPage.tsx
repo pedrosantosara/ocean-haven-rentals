@@ -157,25 +157,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
     loadMessages(booking.id);
   };
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const email = params.get('guest_email');
-    const bid = params.get('booking_id');
-    if (bookings.length > 0 && !selectedBooking) {
-      let found: Booking | undefined;
-      if (email) {
-        found = bookings.find(
-          (b) => (b.guest_email || '').toLowerCase() === email.toLowerCase()
-        );
-      }
-      if (!found && bid) {
-        found = bookings.find((b) => b.id === bid);
-      }
-      if (found) {
-        handleSelectBooking(found);
-      }
-    }
-  }, [bookings, selectedBooking]);
+  // No auto-selection: show the list first; owner picks the conversation
 
   useEffect(() => {
     if (!selectedBooking) return;
