@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ChevronLeft,
   ChevronRight,
@@ -41,6 +41,12 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
   );
   const [viewType, setViewType] = useState<'month' | 'week'>('month');
   const navigate = useNavigate();
+  const location = useLocation();
+  const [highlight, setHighlight] = useState<{
+    start?: string;
+    end?: string;
+  } | null>(null);
+  const [highlightSet, setHighlightSet] = useState<Set<string>>(new Set());
 
   const monthNames = [
     'Janeiro',
@@ -61,6 +67,34 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
   useEffect(() => {
     loadCalendarData();
   }, [currentDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const hs = params.get('highlight_start') || '';
+      const he = params.get('highlight_end') || '';
+      if (hs && he) {
+        setHighlight({ start: hs, end: he });
+        const [y, m] = hs.split('-').map(Number);
+        if (y && m) setCurrentDate(new Date(y, m - 1, 1));
+        const set = new Set<string>();
+        const start = new Date(hs);
+        const end = new Date(he);
+        const cur = new Date(start);
+        while (cur <= end) {
+          set.add(format(cur, 'yyyy-MM-dd'));
+          cur.setDate(cur.getDate() + 1);
+        }
+        setHighlightSet(set);
+      } else {
+        setHighlight(null);
+        setHighlightSet(new Set());
+      }
+    } catch (_) {
+      setHighlight(null);
+      setHighlightSet(new Set());
+    }
+  }, [location.search]);
 
   const loadCalendarData = async () => {
     try {
@@ -378,8 +412,14 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
                 return (
                   <div
                     key={day}
-                    className={`h-36 md:h-28 p-3 md:p-2 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors relative group cursor-pointer ${
+                    className={`h-36 md:h-28 p-3 md:p-2 border rounded-lg transition-colors relative group cursor-pointer ${
                       isToday ? 'bg-blue-50/30' : ''
+                    } ${
+                      highlightSet.has(
+                        format(new Date(year, month, day), 'yyyy-MM-dd')
+                      )
+                        ? 'border-emerald-400 bg-emerald-50/40 animate-pulse'
+                        : 'border-zinc-100 hover:border-zinc-200'
                     }`}
                   >
                     <div className='flex justify-between items-start mb-1'>
@@ -388,6 +428,13 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
                           className={`text-base md:text-sm font-medium ${
                             isToday
                               ? 'text-blue-600 bg-blue-100 w-7 h-7 flex items-center justify-center rounded-full'
+                              : highlightSet.has(
+                                  format(
+                                    new Date(year, month, day),
+                                    'yyyy-MM-dd'
+                                  )
+                                )
+                              ? 'text-emerald-700'
                               : 'text-zinc-700'
                           }`}
                         >
