@@ -214,15 +214,17 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
       }
       if (line.startsWith('END:VEVENT')) {
         if (current.dtstart && current.dtend) {
+          const cat = (current.categories || '').toLowerCase();
           const inclusiveEnd = new Date(current.dtend);
-          inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
+          if (!cat.includes('site')) {
+            inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
+          }
           const cur = new Date(current.dtstart);
           while (cur <= inclusiveEnd) {
             const dateStr = format(cur, 'yyyy-MM-dd');
             let source = current.categories || 'Site';
             let color = '#10b981';
             let type: CalendarEvent['type'] = 'reservation';
-            const cat = (current.categories || '').toLowerCase();
             const sum = (current.summary || '').toLowerCase();
             if (cat.includes('block')) {
               type = 'block';

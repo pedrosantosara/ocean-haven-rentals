@@ -624,7 +624,13 @@ export const BookingCalendar = () => {
                         key={idx}
                         className='flex justify-between text-sm text-muted-foreground'
                       >
-                        <span>Diárias:</span>
+                        <span>
+                          {b.price === pricing.weekend_price
+                            ? 'Diárias fim de semana:'
+                            : b.price === pricing.base_price
+                            ? 'Diárias de semana:'
+                            : 'Diárias:'}
+                        </span>
                         <span className='font-medium'>
                           {b.count}
                           {typeof b.price === 'number' && isFinite(b.price)

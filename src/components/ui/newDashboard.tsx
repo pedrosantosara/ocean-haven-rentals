@@ -13,6 +13,7 @@ import {
   Send,
   User,
   LogOut,
+  Phone,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -31,6 +32,7 @@ interface Reservation {
   id: string;
   guestName: string;
   guestEmail?: string;
+  guestPhone?: string;
   checkIn: string;
   checkOut: string;
   status: string;
@@ -307,6 +309,8 @@ export const NewDashboard: React.FC<{
           guest_name?: string;
           GuestEmail?: string;
           guest_email?: string;
+          GuestPhone?: string;
+          guest_phone?: string;
           CheckIn?: string;
           check_in?: string;
           CheckOut?: string;
@@ -322,6 +326,7 @@ export const NewDashboard: React.FC<{
           id: r.ID || r.id || '',
           guestName: r.GuestName || r.guest_name || '',
           guestEmail: r.GuestEmail || r.guest_email || '',
+          guestPhone: r.GuestPhone || r.guest_phone || '',
           checkIn: r.CheckIn || r.check_in || '',
           checkOut: r.CheckOut || r.check_out || '',
           status: r.Status || r.status || '',
@@ -419,15 +424,17 @@ export const NewDashboard: React.FC<{
       }
       if (line.startsWith('END:VEVENT')) {
         if (current.dtstart && current.dtend) {
+          const cat = (current.categories || '').toLowerCase();
           const inclusiveEnd = new Date(current.dtend);
-          inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
+          if (!cat.includes('site')) {
+            inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
+          }
           const cur = new Date(current.dtstart);
           while (cur <= inclusiveEnd) {
             const dateStr = format(cur, 'yyyy-MM-dd');
             let type: CalendarEvent['type'] = 'reservation';
             let source = current.categories || 'Site';
             let color = '#10b981';
-            const cat = (current.categories || '').toLowerCase();
             const sum = (current.summary || '').toLowerCase();
             if (cat.includes('block')) {
               type = 'block';
@@ -1041,7 +1048,7 @@ export const NewDashboard: React.FC<{
                     return (
                       <div
                         key={r.id}
-                        className='border border-zinc-200 rounded-lg p-4 flex items-start justify-between'
+                        className='border border-zinc-200 rounded-lg p-4'
                       >
                         <div className='flex-1 min-w-0'>
                           <h4 className='font-medium text-zinc-900'>
@@ -1052,6 +1059,14 @@ export const NewDashboard: React.FC<{
                               {r.guestEmail}
                             </p>
                           )}
+                          {r.guestPhone && (
+                            <a
+                              href={`tel:${r.guestPhone}`}
+                              className='text-xs text-zinc-500 inline-flex items-center gap-1 mt-1'
+                            >
+                              <Phone className='w-3 h-3' /> {r.guestPhone}
+                            </a>
+                          )}
                           <div className='mt-2 text-xs text-zinc-500'>
                             {format(new Date(r.checkIn), 'dd MMM', {
                               locale: ptBR,
@@ -1060,6 +1075,30 @@ export const NewDashboard: React.FC<{
                             {format(new Date(r.checkOut), 'dd MMM', {
                               locale: ptBR,
                             })}
+                          </div>
+                          <div className='mt-2 flex items-center gap-2'>
+                            <span
+                              className={`px-2 py-1 text-[11px] rounded-full ${
+                                (r.status || '').toLowerCase() === 'paid'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {(r.status || '').toLowerCase() === 'paid'
+                                ? 'Pago'
+                                : 'Aceita'}
+                            </span>
+                            <span
+                              className={`px-2 py-1 text-[11px] rounded-full ${
+                                (r.status || '').toLowerCase() === 'paid'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {(r.status || '').toLowerCase() === 'paid'
+                                ? 'Pagamento realizado'
+                                : 'Pendente pagamento'}
+                            </span>
                           </div>
                           <div className='bg-zinc-50 rounded-lg p-3 mt-4 border border-zinc-100'>
                             <p className='text-[10px] font-medium text-zinc-400 mb-2 uppercase tracking-wider'>
@@ -1229,43 +1268,6 @@ export const NewDashboard: React.FC<{
                           >
                             Ver no calendário
                           </button>
-                        </div>
-                        <div className='shrink-0 w-40 h-20 ml-4 hidden sm:block'>
-                          <ResponsiveContainer width='100%' height='100%'>
-                            <AreaChart
-                              data={miniData}
-                              margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
-                            >
-                              <defs>
-                                <linearGradient
-                                  id='accSpark'
-                                  x1='0'
-                                  y1='0'
-                                  x2='0'
-                                  y2='1'
-                                >
-                                  <stop
-                                    offset='0%'
-                                    stopColor='#10b981'
-                                    stopOpacity={0.4}
-                                  />
-                                  <stop
-                                    offset='100%'
-                                    stopColor='#10b981'
-                                    stopOpacity={0.05}
-                                  />
-                                </linearGradient>
-                              </defs>
-                              <Area
-                                type='monotone'
-                                dataKey='v'
-                                stroke='#10b981'
-                                strokeWidth={2}
-                                fill='url(#accSpark)'
-                                isAnimationActive
-                              />
-                            </AreaChart>
-                          </ResponsiveContainer>
                         </div>
                       </div>
                     );
