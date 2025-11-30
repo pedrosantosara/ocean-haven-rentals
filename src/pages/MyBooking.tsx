@@ -104,7 +104,7 @@ export default function MyBooking() {
       return;
     }
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || '';
       if (!token) {
         setShowGuestAuth(true);
         toast.error('Verifique sua identidade para continuar');
@@ -222,7 +222,14 @@ export default function MyBooking() {
       setIsPaying(true);
       const stripe = stripeRef.current;
       const elements = elementsRef.current;
-      const result = await stripe.confirmPayment({
+      const result = await (
+        stripe as unknown as {
+          confirmPayment: (opts: {
+            elements: unknown;
+            redirect: string;
+          }) => Promise<{ error?: { message?: string } }>;
+        }
+      ).confirmPayment({
         elements,
         redirect: 'if_required',
       });
@@ -847,7 +854,7 @@ export default function MyBooking() {
                         {booking.status === 'confirmed' && (
                           <>
                             <Button
-                              onClick={() => booking && handlePay(booking)}
+                              onClick={handlePay}
                               className='w-full shadow-ocean mx-auto'
                               variant='gradient'
                             >

@@ -46,15 +46,14 @@ interface OwnerSettings {
 }
 
 const calendarClassNames = {
-  months:
-    'flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full',
+  months: 'grid grid-cols-1 md:grid-cols-2 gap-4 w-full',
   month: 'space-y-4',
   table: 'w-full border-collapse',
   head_row: 'grid grid-cols-7',
   caption_label: 'text-2xl md:text-3xl font-bold tracking-tight',
   head_cell: 'text-muted-foreground truncate font-medium text-base md:text-lg',
   row: 'grid grid-cols-7 w-full mt-2',
-  cell: 'w-full text-center text-base md:text-lg p-0 relative rounded md:rounded-sm overflow-hidden',
+  cell: 'w-full text-center text-base md:text-lg p-0 relative rounded md:rounded-sm',
   day: 'w-full h-full p-0 font-medium text-base md:text-lg py-2 md:py-3',
 };
 const calendarModifiersClassNames = {
@@ -436,7 +435,7 @@ export const BookingCalendar = () => {
           Reserve Sua Estadia
         </h2>
 
-        <div className='grid md:grid-cols-[1fr_380px] xl:grid-cols-[1fr_420px] gap-8 w-full mx-auto'>
+        <div className='grid lg:grid-cols-[1fr_400px] xl:grid-cols-[1fr_420px] gap-8 w-full mx-auto'>
           <Card className='glass-ocean border-primary/20 h-full'>
             <CardHeader>
               <div className='flex items-center justify-between gap-2'>
@@ -478,7 +477,7 @@ export const BookingCalendar = () => {
                 </div>
               )}
             </CardHeader>
-            <CardContent className='p-4 overflow-x-hidden'>
+            <CardContent className='p-4'>
               <Calendar
                 mode='range'
                 selected={{ from: checkIn, to: checkOut }}

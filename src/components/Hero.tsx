@@ -2,7 +2,7 @@ import { Button } from './ui/button';
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import heroVideo from '@/assets/videos/video-casa.mp4';
-import posterImage from '@/assets/images/piscina-home.jpg';
+import posterImage from '@/assets/images/piscina-home.avif';
 
 export const Hero = () => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -17,15 +17,25 @@ export const Hero = () => {
     if (!el) return;
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (reduce.matches) return;
-    const connection = (navigator as Navigator & { connection?: { effectiveType?: string } }).connection;
-    if (connection && connection.effectiveType && ['slow-2g', '2g'].includes(connection.effectiveType)) return;
-    const io = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting && !loaded) {
-        el.src = heroVideo;
-        el.play().catch(() => {});
-        setLoaded(true);
-      }
-    }, { threshold: 0.25 });
+    const connection = (
+      navigator as Navigator & { connection?: { effectiveType?: string } }
+    ).connection;
+    if (
+      connection &&
+      connection.effectiveType &&
+      ['slow-2g', '2g'].includes(connection.effectiveType)
+    )
+      return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !loaded) {
+          el.src = heroVideo;
+          el.play().catch(() => {});
+          setLoaded(true);
+        }
+      },
+      { threshold: 0.25 }
+    );
     io.observe(el);
     return () => io.disconnect();
   }, [loaded]);
@@ -53,7 +63,11 @@ export const Hero = () => {
         <p className='text-lg md:text-2xl mb-8 max-w-2xl'>
           Experimente conforto, exclusividade e o mar mais azul do Brasil.
         </p>
-        <Button onClick={scrollToBooking} variant='gradient' className='transition'>
+        <Button
+          onClick={scrollToBooking}
+          variant='gradient'
+          className='transition'
+        >
           Reservar agora
           <ChevronDown className='ml-2 h-4 w-4' />
         </Button>

@@ -4,10 +4,10 @@ import { Hero } from '@/components/Hero';
 import { BookingCalendar } from '@/components/BookingCalendar';
 import { Footer } from '@/components/Footer';
 import { Button } from '@/components/ui/button';
-import piscinaHome from '@/assets/images/piscina-home.jpg';
-import sala11 from '@/assets/images/LivingRoom/foto-sala-11.jpg';
-import piscina12 from '@/assets/images/PoolBar/foto-piscina-bar-12.jpg';
-import airbnbBadge from '@/assets/images/Airbnb-Badge.jpg';
+import piscinaHome from '@/assets/images/piscina-home.avif';
+import sala11 from '@/assets/images/LivingRoom/foto-sala-11.avif';
+import piscina12 from '@/assets/images/PoolBar/foto-piscina-bar-12.avif';
+import airbnbBadge from '@/assets/images/Airbnb-Badge.avif';
 import { Star } from 'lucide-react';
 
 const Index = () => {
