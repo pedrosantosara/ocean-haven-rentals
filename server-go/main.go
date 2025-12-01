@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-delve/delve/service"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -95,7 +96,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"email": body.Email, "is_owner": body.IsOwner, "exp": time.Now().Add(7 * 24 * time.Hour).Unix()})
 	str, _ := token.SignedString([]byte(s.jwtSecret))
 	if s.email != nil {
-		link := "https://localhost:3000/verify?email=" + url.QueryEscape(body.Email)
+		link := s.siteURL + "/verify?email=" + url.QueryEscape(body.Email)
 		_ = s.email.SendAccountConfirmationEmail(body.Email, emailpkg.AccountConfirmationData{Name: body.FullName, VerificationLink: link})
 	}
 	jsonResp(w, 200, map[string]string{"token": str})
@@ -1693,6 +1694,10 @@ func main() {
 	if secret == "" {
 		secret = "dev-secret"
 	}
+	siteURL := os.Getenv("SITE_URL")
+	if siteURL == "" {
+		log.Fatal := service.NewUserService(siteURL)
+
 	cfg, _ := pgxpool.ParseConfig(dsn)
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	if err != nil {
@@ -1704,7 +1709,7 @@ func main() {
 	}
 	stripeSecret := os.Getenv("STRIPE_SECRET_KEY")
 	stripePublic := os.Getenv("STRIPE_PUBLIC_KEY")
-	s := &Server{pool: pool, jwtSecret: secret, hub: NewHub(), stripeSecret: stripeSecret, stripePublic: stripePublic}
+	s := &Server{pool: pool, jwtSecret: secret, hub: NewHub(), stripeSecret: stripeSecret, stripePublic: stripePublic, siteURL: siteURL}
 	emailClient := emailpkg.NewResendClient()
 	s.email = emailpkg.NewEmailService(emailClient)
 	r := mux.NewRouter()

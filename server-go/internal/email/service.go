@@ -9,6 +9,14 @@ import (
 type EmailService struct {
     client *resend.Client
 }
+type UserService struct {
+    siteURL  string
+}
+
+func NewUserService(siteURL string) *UserService {
+    return &UserService{siteURL: siteURL}
+}
+
 
 func NewEmailService(client *resend.Client) *EmailService {
     return &EmailService{client: client}
