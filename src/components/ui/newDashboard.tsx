@@ -152,7 +152,7 @@ export const NewDashboard: React.FC<{
   }, []);
 
   useEffect(() => {
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
     const token = localStorage.getItem('token');
     const y = currentDate.getFullYear();
     const m = currentDate.getMonth();
@@ -185,7 +185,7 @@ export const NewDashboard: React.FC<{
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
     const ids = previewReservations.map((r) => r.id);
     if (ids.length === 0) {
       setLastMessagePreview({});
@@ -251,8 +251,8 @@ export const NewDashboard: React.FC<{
     if (!token) return;
     const conns: Array<WebSocket> = [];
     previewReservations.forEach((r) => {
-      const wsUrl = `ws://localhost:3005/ws/messages?booking_id=${r.id}&token=${token}`;
-      const ws = new WebSocket(wsUrl);
+      const WS = import.meta.env.VITE_WS_URL as string;
+      const ws = new WebSocket(`${WS}?booking_id=${r.id}&token=${token}`);
       ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
@@ -295,7 +295,7 @@ export const NewDashboard: React.FC<{
   const loadDashboardData = async () => {
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       const res = await fetch(`${API}/bookings`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -491,7 +491,7 @@ export const NewDashboard: React.FC<{
   const approveBooking = async (id: string) => {
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
       const res = await fetch(`${API}/bookings/${id}/approve`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -507,7 +507,7 @@ export const NewDashboard: React.FC<{
   const rejectBooking = async (id: string) => {
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
       const res = await fetch(`${API}/bookings/${id}/reject`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -696,7 +696,7 @@ export const NewDashboard: React.FC<{
                       toast.error('Valor inválido');
                       return;
                     }
-                    const API = 'http://localhost:3005';
+                    const API = import.meta.env.VITE_API_URL as string;
                     const token = localStorage.getItem('token');
                     const dates = Array.from(selectedDays);
                     const res = await fetch(`${API}/date-prices/bulk`, {
@@ -963,7 +963,7 @@ export const NewDashboard: React.FC<{
                           className='bg-white border border-zinc-200 p-2 rounded-md hover:bg-zinc-50 text-zinc-600'
                           onClick={async () => {
                             const token = localStorage.getItem('token');
-                            const API = 'http://localhost:3005';
+                            const API = import.meta.env.VITE_API_URL as string;
                             const msg = quickReplies[r.id];
                             if (!msg) return;
                             await fetch(`${API}/messages`, {
@@ -1221,7 +1221,8 @@ export const NewDashboard: React.FC<{
                             onClick={async () => {
                               try {
                                 const token = localStorage.getItem('token');
-                                const API = 'http://localhost:3005';
+                                const API = import.meta.env
+                                  .VITE_API_URL as string;
                                 const res = await fetch(
                                   `${API}/bookings/${r.id}/cancel`,
                                   {
@@ -1353,7 +1354,7 @@ export const NewDashboard: React.FC<{
               <Button
                 variant='outline'
                 onClick={async () => {
-                  const API = 'http://localhost:3005';
+                  const API = import.meta.env.VITE_API_URL as string;
                   const token = localStorage.getItem('token');
                   const res = await fetch(
                     `${API}/date-prices/${selectedDateStr}`,
@@ -1383,7 +1384,7 @@ export const NewDashboard: React.FC<{
             <Button
               onClick={async () => {
                 if (!selectedDateStr) return;
-                const API = 'http://localhost:3005';
+                const API = import.meta.env.VITE_API_URL as string;
                 const token = localStorage.getItem('token');
                 const price = Number(datePriceInput);
                 if (!isFinite(price)) {

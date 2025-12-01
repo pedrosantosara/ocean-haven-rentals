@@ -30,7 +30,7 @@ const NewDashboardPage = () => {
           navigate('/auth');
           return;
         }
-        const API = 'http://localhost:3005';
+        const API = import.meta.env.VITE_API_URL as string;
         const r = await fetch(`${API}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });

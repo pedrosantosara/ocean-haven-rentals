@@ -91,7 +91,8 @@ export const BookingCalendar = () => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      fetch('http://localhost:3005/auth/me', {
+      const API = import.meta.env.VITE_API_URL as string;
+      fetch(`${API}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then((res) => {
@@ -119,7 +120,7 @@ export const BookingCalendar = () => {
   }, []);
 
   useEffect(() => {
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
     fetch(`${API}/settings/public`)
       .then(async (res) => {
         if (!res.ok) return;
@@ -138,7 +139,7 @@ export const BookingCalendar = () => {
   }, []);
 
   useEffect(() => {
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
     let cancelled = false;
     const parseIcsDate = (value: string): Date => {
       if (/^\d{8}$/.test(value)) {
@@ -273,7 +274,8 @@ export const BookingCalendar = () => {
     const fetchPricing = async () => {
       setCalculatingPrice(true);
       try {
-        const res = await fetch('http://localhost:3005/bookings/calculate', {
+        const API = import.meta.env.VITE_API_URL as string;
+        const res = await fetch(`${API}/bookings/calculate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -339,7 +341,7 @@ export const BookingCalendar = () => {
       return;
     }
 
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
 
     setLoading(true);
 

@@ -36,7 +36,7 @@ export default function Chat() {
   const [reply, setReply] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const API = 'http://localhost:3005';
+  const API = import.meta.env.VITE_API_URL as string;
 
   const mapStatus = (s: string) =>
     (s === 'approved'
@@ -189,7 +189,8 @@ export default function Chat() {
     if (!token || !bookingId) return;
     loadBooking();
     loadMessages();
-    const url = `ws://localhost:3005/ws/messages?booking_id=${encodeURIComponent(
+    const WS = import.meta.env.VITE_WS_URL as string;
+    const url = `${WS}?booking_id=${encodeURIComponent(
       bookingId
     )}&token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);

@@ -43,7 +43,7 @@ export const GuestsPage: React.FC<GuestsPageProps> = ({ onNavClick }) => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       // Load bookings and group by guest
       const res = await fetch(`${API}/bookings`, {

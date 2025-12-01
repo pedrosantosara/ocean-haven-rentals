@@ -31,7 +31,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
       try {
         const token = localStorage.getItem('token');
         if (!token) return;
-        const API = 'http://localhost:3005';
+        const API = import.meta.env.VITE_API_URL as string;
         const r = await fetch(`${API}/settings`, { headers: { Authorization: `Bearer ${token}` } });
         if (!r.ok) return;
         const j = await r.json();
@@ -64,7 +64,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavClick }) => {
     try {
       const token = localStorage.getItem('token');
       if (!token) return;
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
       const body = {
         PropertyName: propertyName,
         CheckinTime: checkinTime,

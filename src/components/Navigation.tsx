@@ -39,7 +39,7 @@ export const Navigation = () => {
       setIsOwner(false);
       return;
     }
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
     const res = await fetch(`${API}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });

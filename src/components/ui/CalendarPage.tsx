@@ -100,7 +100,7 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       // Load reservations
       const res = await fetch(`${API}/bookings`, {
@@ -286,7 +286,8 @@ export const CalendarPage: React.FC<CalendarPageProps> = ({ onNavClick }) => {
   };
 
   const handleCopyICalLink = () => {
-    navigator.clipboard.writeText('http://localhost:3005/calendar/merged.ics');
+    const API = import.meta.env.VITE_API_URL as string;
+    navigator.clipboard.writeText(`${API}/calendar/merged.ics`);
   };
 
   const handleNewReservation = () => {

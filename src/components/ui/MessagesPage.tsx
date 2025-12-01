@@ -64,7 +64,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       const res = await fetch(`${API}/bookings`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -113,7 +113,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
   const loadMessages = async (bookingId: string) => {
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       const res = await fetch(`${API}/messages?booking_id=${bookingId}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -163,8 +163,8 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
     if (!selectedBooking) return;
     const token = localStorage.getItem('token');
     if (!token) return;
-    const APIWS = 'ws://localhost:3005';
-    const url = `${APIWS}/ws/messages?booking_id=${encodeURIComponent(
+    const WS = import.meta.env.VITE_WS_URL as string;
+    const url = `${WS}?booking_id=${encodeURIComponent(
       selectedBooking.id
     )}&token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(url);
@@ -209,7 +209,7 @@ export const MessagesPage: React.FC<MessagesPageProps> = ({ onNavClick }) => {
 
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       const res = await fetch(`${API}/messages`, {
         method: 'POST',

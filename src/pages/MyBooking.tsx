@@ -110,7 +110,7 @@ export default function MyBooking() {
         toast.error('Verifique sua identidade para continuar');
         return;
       }
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
       const params = new URLSearchParams(window.location.search);
       const pt = params.get('pt');
       const url = `${API}/bookings/${booking.id}/payment-intent`;
@@ -158,7 +158,7 @@ export default function MyBooking() {
     }
     try {
       setIsRequestingCode(true);
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
       const res = await fetch(`${API}/auth/request-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -186,7 +186,7 @@ export default function MyBooking() {
     }
     try {
       setIsVerifyingCode(true);
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
       const res = await fetch(`${API}/auth/verify-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -239,7 +239,7 @@ export default function MyBooking() {
         return;
       }
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
       const r = await fetch(`${API}/bookings/${booking.id}/mark-paid`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -265,7 +265,7 @@ export default function MyBooking() {
       setLoading(false);
       return;
     }
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
     const meRes = await fetch(`${API}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -422,15 +422,14 @@ export default function MyBooking() {
     const params = new URLSearchParams(window.location.search);
     const pt = params.get('pt') || '';
     if (!token && !pt && !guestEmail) return;
+    const WS = import.meta.env.VITE_WS_URL as string;
     const wsUrl = token
-      ? `ws://localhost:3005/ws/messages?booking_id=${booking.id}&token=${token}`
+      ? `${WS}?booking_id=${booking.id}&token=${token}`
       : pt
-      ? `ws://localhost:3005/ws/messages?booking_id=${
-          booking.id
-        }&pt=${encodeURIComponent(pt)}`
-      : `ws://localhost:3005/ws/messages?booking_id=${
-          booking.id
-        }&guest_email=${encodeURIComponent(guestEmail)}`;
+      ? `${WS}?booking_id=${booking.id}&pt=${encodeURIComponent(pt)}`
+      : `${WS}?booking_id=${booking.id}&guest_email=${encodeURIComponent(
+          guestEmail
+        )}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => console.log('Connected to chat WS');
@@ -538,7 +537,7 @@ export default function MyBooking() {
 
   const loadMessages = async (bookingId: string) => {
     const token = localStorage.getItem('token');
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
     const params = new URLSearchParams(window.location.search);
     const pt = params.get('pt') || '';
     if (!token && !pt && !guestEmail) return;
@@ -564,7 +563,7 @@ export default function MyBooking() {
   const sendMessage = async () => {
     if (!newMessage.trim() || !booking) return;
     const token = localStorage.getItem('token');
-    const API = 'http://localhost:3005';
+    const API = import.meta.env.VITE_API_URL as string;
     const params = new URLSearchParams(window.location.search);
     const pt = params.get('pt') || '';
     const url = token

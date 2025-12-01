@@ -22,7 +22,7 @@ export default function Auth() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const API = 'http://localhost:3005';
+  const API = import.meta.env.VITE_API_URL as string;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

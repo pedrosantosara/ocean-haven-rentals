@@ -32,7 +32,7 @@ export function DashboardCalendar({ bookings, onUpdate }: DashboardCalendarProps
   const [showDialog, setShowDialog] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [reply, setReply] = useState("");
-  const API = "http://localhost:3005";
+  const API = import.meta.env.VITE_API_URL as string;
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);

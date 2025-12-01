@@ -32,7 +32,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
   const loadSyncs = async () => {
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       const res = await fetch(`${API}/ical`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
@@ -73,7 +73,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
     setIsAdding(true);
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       const res = await fetch(`${API}/ical`, {
         method: 'POST',
@@ -102,7 +102,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
   const removeSync = async (id: number) => {
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
 
       const res = await fetch(`${API}/ical/${id}`, {
         method: 'DELETE',
@@ -123,7 +123,7 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
     setIsSyncing(true);
     try {
       const token = localStorage.getItem('token');
-      const API = 'http://localhost:3005';
+      const API = import.meta.env.VITE_API_URL as string;
       const res = await fetch(`${API}/ical/sync`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
@@ -147,7 +147,8 @@ export const SyncPage: React.FC<SyncPageProps> = ({ onNavClick }) => {
   }, []);
 
   const copyICalLink = () => {
-    navigator.clipboard.writeText('http://localhost:3005/calendar/merged.ics');
+    const API = import.meta.env.VITE_API_URL as string;
+    navigator.clipboard.writeText(`${API}/calendar/merged.ics`);
   };
 
   const getPlatformColor = (platform: string) => {
